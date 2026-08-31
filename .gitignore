@@ -28,6 +28,18 @@ dist/
 .venv/
 venv/
 
+# TLS material. The local development certificate is generated on demand by
+# scripts/gen_tls_secret.sh and applied straight to the cluster; the private key
+# has no reason to exist in a working tree, let alone in history. Listed by
+# extension rather than by path so a key dropped anywhere is still ignored.
+*.key
+*.pem
+*.crt
+*.csr
+*.p12
+*.pfx
+certs/
+
 # Tooling caches
 .pytest_cache/
 .mypy_cache/

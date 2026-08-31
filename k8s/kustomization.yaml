@@ -11,6 +11,15 @@ namespace: agent-platform
 # Both Secrets must exist before the Deployment will run: the API mounts the
 # credential table and refuses to start without it. That refusal is the design
 # working, not a missing step to route around.
+#
+# `tls-secret.example.yaml` is a third template and is also not listed. The real
+# TLS Secret comes from scripts/gen_tls_secret.sh, which generates a key, hands
+# it to kubectl and deletes it. `ingress.yaml` IS listed: it carries no secret,
+# only a reference to one by name.
+#
+# Applying the Ingress with no ingress controller installed is harmless -- the
+# object exists and nothing acts on it. It becomes live when a controller is
+# present; see docs/kubernetes.md.
 resources:
   - namespace.yaml
   - serviceaccount.yaml
@@ -19,6 +28,7 @@ resources:
   - postgres.yaml
   - deployment.yaml
   - service.yaml
+  - ingress.yaml
   - pdb.yaml
   - network-policy.yaml
   - hpa.yaml

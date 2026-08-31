@@ -114,6 +114,9 @@ ignore = ["S101"]  # assert is expected in tests
 "scripts/ci_assert_no_secret_in_logs.py" = ["S607"]
 # Same again: `git` from PATH is how git is invoked.
 "tests/security/test_protected_baseline.py" = ["S607"]
+# And for the TLS work: `kubectl`, `openssl` and `git` from PATH.
+"tests/security/test_tls_ingress.py" = ["S607"]
+"scripts/tls_proofs.py" = ["S607"]
 
 [tool.mypy]
 # Matches the interpreter the project is developed and tested against. The

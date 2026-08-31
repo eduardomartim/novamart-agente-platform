@@ -1,0 +1,34 @@
+# Cluster configuration for a kind cluster that can serve an Ingress.
+#
+# Only needed when CREATING a cluster. An existing cluster cannot gain these
+# settings -- kind bakes them into the node container at creation -- which is
+# why scripts/k8s_up.sh uses this file for new clusters and never recreates an
+# existing one. Recreating a cluster destroys everything in it, and that is a
+# decision for a person, not a script.
+#
+# Without this, the ingress controller runs but nothing on the host can reach
+# it: there is no path from the host's port 443 into the node. The fallback
+# that needs no recreation is a port-forward to the controller's Service, which
+# scripts/cluster_proofs.py uses, so the HTTPS proofs work either way.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      # ingress-nginx's kind manifest schedules its controller onto a node
+      # carrying this label, and tolerates the control-plane taint to get
+      # there. On a single-node cluster that node is this one.
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # 80 is answered only to redirect. 443 is where the platform actually
+      # lives once TLS is in front of it.
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP

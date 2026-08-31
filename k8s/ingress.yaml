@@ -1,0 +1,72 @@
+# TLS terminates here, and nowhere else.
+#
+# The distinction this file rests on: **TLS is not authentication.** The Ingress
+# proves to a client that it is talking to the expected host and encrypts the
+# conversation. It says nothing about who the client is. That question is
+# answered inside the application by the bearer credential introduced in V2.6,
+# and the Ingress neither adds to nor subtracts from it -- a request arriving
+# over HTTPS without a credential still gets 401, and one arriving with the
+# wrong scope still gets 403.
+#
+# What changes is the caveat. Before this, the reason the Service stayed
+# ClusterIP was that a bearer token over plain HTTP is a token in the clear.
+# With TLS in front, the credential is no longer relying on the network being
+# trusted.
+#
+# What does NOT change: the Service is still ClusterIP. Nothing is published to
+# the host directly; the only route in is through the controller, which is the
+# single place TLS is configured and the single place to look when it is wrong.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-platform-api
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: agent-platform
+  annotations:
+    # Plain HTTP is answered with a redirect rather than served. A demo that
+    # accepts both teaches the wrong habit, and an API that quietly accepts
+    # cleartext is an API whose clients will eventually send a credential over
+    # it.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # The upstream speaks plain HTTP inside the cluster. That is deliberate and
+    # not a gap: pod-to-pod traffic never leaves the node here, the
+    # NetworkPolicy already restricts who may reach port 8000, and terminating
+    # TLS twice would mean managing a second certificate to protect a hop that
+    # does not cross a trust boundary. Production with a service mesh would
+    # make a different call; this is a local cluster and says so.
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+    # An agent run can take a while, and a suspended one waits for a human.
+    # The controller's default 60s would cut a legitimate request off.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+
+    # The API's own limit is 8000 characters, enforced by the input-security
+    # layer. A body ceiling here is a memory guard, set well above it so the two
+    # never disagree about the same request.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - agent-platform.local
+      # Created by scripts/gen_tls_secret.sh, never committed. The private key
+      # is generated, piped to kubectl and discarded -- it does not touch the
+      # working tree. See k8s/tls-secret.example.yaml.
+      secretName: agent-platform-tls
+  rules:
+    - host: agent-platform.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-platform-api
+                port:
+                  name: http

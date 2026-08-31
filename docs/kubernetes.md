@@ -35,6 +35,65 @@ kubectl -n agent-platform rollout status deployment/agent-platform-api
 kubectl -n agent-platform port-forward svc/agent-platform-api 8000:8000
 ```
 
+## TLS, locally
+
+```bash
+./scripts/k8s_up.sh            # the platform
+./scripts/k8s_ingress_up.sh    # the controller, a certificate, the Ingress
+```
+
+`scripts/gen_tls_secret.sh` generates the certificate: `openssl` writes the key
+into a `mktemp` directory, `kubectl` reads it from there, and a `trap` deletes
+it even on failure. The key never enters the working tree and never appears in
+an `argv`; `.gitignore` refuses `*.key`, `*.pem` and `*.crt` by extension as a
+second line of defence.
+
+**TLS is not authentication.** The Ingress proves the host and encrypts the
+conversation. It does not say who the caller is: over HTTPS, a request with no
+bearer credential still gets 401, and one with the wrong scope still gets 403.
+What changed is the caveat -- a credential no longer relies on the network
+being trusted.
+
+Plain HTTP is redirected rather than served. An API that quietly accepts
+cleartext is an API whose clients eventually send a credential over it.
+
+### Reaching it
+
+A cluster created from `k8s/kind-config.yaml` maps host ports 80 and 443 into
+the node, so once `agent-platform.local` resolves to `127.0.0.1`:
+
+```bash
+curl --cacert <the certificate> https://agent-platform.local/health
+```
+
+kind bakes those mappings in at creation, so an **existing** cluster cannot
+gain them -- `scripts/k8s_up.sh` deliberately never recreates one, because
+recreating destroys everything in it. Forward the controller instead:
+
+```bash
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8443:443
+curl -k --resolve agent-platform.local:8443:127.0.0.1 https://agent-platform.local:8443/health
+```
+
+`-k` skips the certificate check: fine for a local demo, not fine anywhere a
+credential is sent to a real host.
+
+### What this is not
+
+A self-signed certificate for a hostname that does not exist. Production would
+use a real CA -- cert-manager with ACME, or one issued by the organisation --
+and this is deliberately not that. It demonstrates that the edge terminates TLS
+and that the application is unchanged by it.
+
+### Not yet executed
+
+`scripts/tls_proofs.py` holds the live HTTPS proofs: the certificate covers the
+hostname, plain HTTP redirects, HTTPS reaches the application, and an
+unauthenticated request over TLS is still refused. They are written and have
+**not been run** -- the Docker daemon was down for the whole of V2.9, so no
+cluster existed to run them against. Twenty-one static checks cover what can be
+verified without one.
+
 Tearing it down:
 
 ```bash
@@ -235,9 +294,12 @@ context keeps the shipping image's context exactly as tight as it was.
   confirmations are lost and the API goes NotReady until it returns.
 - **Single node.** Every pod is on the same machine, so nothing here says
   anything about node failure or scheduling across zones.
-- **No TLS.** Authentication is enforced (V2.6), but a bearer token over plain
-  HTTP relies on the network. The Service stays `ClusterIP` with no Ingress for
-  that reason: authentication alone does not make the port safe to publish.
+- ~~No TLS~~ — closed in V2.9 **for a local cluster**. An ingress-nginx
+  controller terminates TLS at `agent-platform.local` with a self-signed
+  certificate; the Service is still `ClusterIP`, so the controller remains the
+  only route in. Verified by static checks (21 tests); the live HTTPS proofs in
+  `scripts/tls_proofs.py` are written and **have not been executed** — the
+  Docker daemon was down for the whole phase.
 - ~~No authentication~~ — closed in V2.6. Credentials arrive as a Secret mounted
   read-only at `/etc/agent-platform/auth/keys`, not as environment: env is
   readable through `/proc/<pid>/environ`, lands in crash dumps, and is inherited

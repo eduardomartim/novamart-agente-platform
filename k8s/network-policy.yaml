@@ -28,8 +28,23 @@ spec:
       app.kubernetes.io/component: api
   policyTypes: [Ingress]
   ingress:
+    # Pods in this namespace. Unchanged.
     - from:
         - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+    # And the ingress controller, which lives in its own namespace.
+    #
+    # Without this rule the default-deny policy silences the Ingress: the
+    # controller accepts the connection, terminates TLS, and then cannot reach
+    # the pod -- so a correct Ingress and a correct certificate produce a 502
+    # and nothing explains why. `podSelector: {}` above is namespace-scoped,
+    # which is easy to read as "anything" and is not.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
       ports:
         - protocol: TCP
           port: 8000

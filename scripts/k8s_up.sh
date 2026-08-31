@@ -23,7 +23,17 @@ TOKENS_OUT="${TOKENS_OUT:-$(mktemp -t agent-platform-tokens.XXXXXX)}"
 
 python="${PYTHON:-python}"
 
-kind get clusters | grep -qx "$CLUSTER" || kind create cluster --name "$CLUSTER" --wait 180s
+# A NEW cluster is created from k8s/kind-config.yaml, which maps host ports 80
+# and 443 into the node so an ingress controller can be reached. An EXISTING
+# cluster is left alone: kind bakes those mappings in at creation, so adding
+# them would mean destroying the cluster and everything in it. That is a
+# decision for a person, and the HTTPS proofs work through a port-forward
+# either way.
+if ! kind get clusters | grep -qx "$CLUSTER"; then
+  kind create cluster --name "$CLUSTER" --config k8s/kind-config.yaml --wait 180s
+else
+  echo "cluster $CLUSTER already exists; leaving it as it is"
+fi
 
 docker build -t "$IMAGE" .
 kind load docker-image "$IMAGE" --name "$CLUSTER"
@@ -116,6 +126,9 @@ echo "  $TOKENS_OUT"
 echo
 echo "Forward the Service with:"
 echo "  kubectl -n $NS port-forward svc/agent-platform-api 8000:8000"
+echo
+echo "For TLS, install the ingress controller and generate a certificate:"
+echo "  ./scripts/k8s_ingress_up.sh"
 echo
 echo "The API is authenticated. Requests need a bearer token from that file;"
 echo "an unauthenticated caller gets 401, which is the design working."
