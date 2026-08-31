@@ -678,6 +678,22 @@ suite, the live gate and the offline suite. Every target spells out
 convenient way to run the suite is also the way that cannot select live tests by
 accident.
 
+### Scale and load
+
+```bash
+python scripts/load_test.py --replicas 10 --workers 20 --requests 200
+```
+
+Ten replicas over one database, the stub provider, no Docker. It reports
+throughput and percentiles and then asserts the thing that matters: **200 rows
+for 200 requests, no duplicate ids** — a lost write and a duplicated write both
+look like success otherwise. `tests/integration/test_scale.py` runs the same
+invariants in the suite.
+
+Measured here: 21.6 req/s, p50 231 ms, p95 3713 ms, p99 6174 ms, 200/200
+successful. The long tail is SQLite write contention between concurrent
+writers; the deployment that matters uses Postgres.
+
 ### Continuous integration
 
 `.github/workflows/ci.yml` on every pull request; `nightly.yml` for the shuffled

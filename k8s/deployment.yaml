@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: agent-platform
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "2.5"
+    app.kubernetes.io/version: "3.0"
     app.kubernetes.io/managed-by: kubectl
 spec:
   replicas: 2
@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/name: agent-platform
         app.kubernetes.io/component: api
         app.kubernetes.io/part-of: agent-platform
-        app.kubernetes.io/version: "2.5"
+        app.kubernetes.io/version: "3.0"
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"

@@ -219,7 +219,12 @@ behaviours wearing one name.
 
 - **The circuit breaker is still per-replica.** Each learns a provider outage
   independently, so a failing provider is retried once per replica before all of
-  them open. Wasteful, not incorrect.
+  them open. Wasteful, not incorrect — and asserted in
+  `tests/integration/test_scale.py` rather than left to this paragraph.
+- **Verified at ten replicas, not just two.** Ten instances over one database,
+  driven concurrently: 200 requests produced 200 ledger rows with no duplicate
+  ids, every status was one the platform defines, and every replica agreed on
+  total spend. See `scripts/load_test.py` and `docs/release-readiness.md`.
 - **Single-tenant.** Rate limits, budget and data are global; there is no tenant
   concept anywhere.
 - **Authentication is enforced** as of V2.6: the HTTP API refuses to start
