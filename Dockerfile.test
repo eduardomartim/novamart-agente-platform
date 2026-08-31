@@ -32,7 +32,16 @@ WORKDIR /src
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
 
-RUN python -m pip install --no-cache-dir -e ".[dev,dashboard,api,redis,mcp,postgres]"
+# pip itself is upgraded first. The base image ships 25.0.1, which pip-audit
+# reports as PYSEC-2026-2876 and PYSEC-2026-3721 -- findings in the installer,
+# not in this project's dependencies.
+#
+# The production image is unaffected for a better reason: it uninstalls pip,
+# setuptools and wheel after the install, so the toolchain is not in the
+# artefact at all. This image keeps pip because it exists to run the suite, so
+# it upgrades instead.
+RUN python -m pip install --no-cache-dir --upgrade pip \
+ && python -m pip install --no-cache-dir -e ".[dev,dashboard,api,redis,mcp,postgres]"
 
 # Tests and the data the suite reads are copied at the end: they change most
 # often and should not invalidate the dependency layer.
