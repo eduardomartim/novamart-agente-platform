@@ -108,6 +108,10 @@ ignore = ["S101"]  # assert is expected in tests
 # from a literal scheme and 127.0.0.1. Both are correct defaults elsewhere and
 # nothing but noise here.
 "tests/integration/test_container.py" = ["S607", "S310"]
+# Same reasoning for the cluster scripts: driving `kubectl` from PATH is the
+# whole job, and pinning an absolute path would break every machine but one.
+"scripts/cluster_proofs.py" = ["S607"]
+"scripts/ci_assert_no_secret_in_logs.py" = ["S607"]
 
 [tool.mypy]
 # Matches the interpreter the project is developed and tested against. The

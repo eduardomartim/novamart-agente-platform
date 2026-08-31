@@ -1,0 +1,15 @@
+# Line endings are pinned, not left to the platform.
+#
+# Without this, a checkout on Windows converts LF to CRLF in the working tree.
+# Two things break quietly when that happens: shell scripts get a `\r` in the
+# shebang and fail on Linux with "bad interpreter", and every protected file's
+# hash changes -- so the byte-for-byte verification this project runs at the end
+# of each phase would report a difference that is not a change to the code.
+#
+# LF everywhere, in the repository and in the working tree, on every platform.
+* text=auto eol=lf
+
+# Never normalised and never diffed as text. The vector index is tracked
+# deliberately (see .gitignore) and its SHA-256 is pinned; a single byte of
+# line-ending translation would invalidate it.
+*.db binary

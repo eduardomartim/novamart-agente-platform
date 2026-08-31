@@ -2330,3 +2330,115 @@ Reaching the live ceiling therefore cannot break the offline demonstration.
 * `13/13 smoke` and `11/11 adversarial` remain **unclaimed**; the three skips
   from §32 remain skips.
 * The budget's *refusal* path is still unobserved against a real provider.
+
+---
+
+# V2.7 — the live gate, and CI
+
+## §36 The 72-call incident
+
+A phase that intended to run the offline suite spent 72 unintended provider
+calls. The chain, established by reading the code rather than by inference:
+
+1. `pyproject.toml` carried `addopts = "-q --strict-markers -m 'not live'"`.
+   That deselection was the only load-bearing control.
+2. The command run was `pytest -q -p no:cacheprovider -m "not docker"`.
+3. pytest stores a single `markexpr` (`_pytest/mark/__init__.py`), so a `-m` on
+   the command line **replaces** the one from `addopts`. The effective filter
+   became `not docker`, and `not live` stopped applying.
+4. 22 live test functions became eligible, one of them parametrised.
+5. Both live modules called `load_dotenv()` at **import** time. Collection
+   imports every module regardless of marker filters, so the developer's real
+   key entered `os.environ` for the whole session before any fixture ran.
+6. Their `pytestmark` skipped on *absence of a key* — so possessing one
+   **enabled** the tests rather than gating them.
+7. The conftest guard that blocks real SDK calls exempted anything marked
+   `live`, by design. It opened for precisely the dangerous case.
+8. The last check before the network was `budget.try_consume()` against a
+   400-call daily ceiling. It answers "how many more?", never "may you at all?",
+   so it would have stopped call 401 and not call 1.
+
+Three controls, one decision. Remove the filter and the rest cooperate.
+
+**Ledger effect:** `2026-08-31: 72`. No key, prompt or completion was
+disclosed; the failure was expenditure, not leakage.
+
+## §37 The structural fix
+
+Authorisation is now a fact separate from the key, checked in
+`build_provider()` — the one function every path to a real provider passes
+through, and one that sits *below* pytest, so no marker expression, `-k`,
+`--noconftest` or `-p no:…` reaches it. It also covers the callers that are not
+tests at all: the CLI, the dashboard, and `scripts/build_vector_index.py`.
+
+```
+AGENT_PLATFORM_LIVE=i-authorise-real-provider-calls
+```
+
+Matched exactly. `1`, `true`, `yes` and every near-miss are refused, because
+those are the values that arrive by accident in CI matrices and shell profiles.
+It is deliberately **not** read through `python-dotenv`: a value that can arrive
+from a file becomes ambient, which is exactly how the key became sufficient.
+
+Three further changes closed the rest of the chain:
+
+* the import-time `load_dotenv()` was removed from both live modules — the key
+  is now read inside a fixture, after authorisation is established;
+* their `skipif` asks about authorisation instead of key presence;
+* the conftest guard now covers `embed_content` as well as `generate_content`.
+  That gap was independent of the incident: the retrieval embedding path had no
+  cover at all, so an offline test reaching embeddings with a key configured
+  would have made a real call with nothing to stop it.
+
+A collection gate in `tests/conftest.py` fails the run when live tests are
+selected without authorisation, and explains the `-m` trap in the message. It
+carries `@pytest.hookimpl(trylast=True)` — without it the hook runs before
+pytest's own marker deselection, sees every live test even on a safe run, and
+fails every ordinary offline invocation. That was found by running it.
+
+### Non-vacuity
+
+| Reversion | Broke |
+|---|---|
+| the barrier in `build_provider()` | 1 — the test that pins the outer layer |
+| the client guard in `GeminiProvider` | 1 |
+| accepting booleans as authorisation | 7 |
+| `embed_content` coverage in the conftest guard | 1 |
+| **only** the collection gate | the gate tests; the structural ones still pass |
+
+The first reversion was vacuous on its first run, and that found a real gap: the
+two layers are redundant by design, so removing the factory's check still left
+the constructor refusing, and every assertion still saw `LiveNotAuthorised`.
+`test_the_factory_refuses_before_it_reaches_the_provider_class` now pins the
+outer layer specifically by replacing `GeminiProvider` with something that fails
+if it is ever reached.
+
+## §38 CI
+
+Two workflows. No job in either holds a provider credential or
+`AGENT_PLATFORM_LIVE`, and `scripts/ci_assert_no_live.py` checks that at the top
+of every job that runs tests — because a workflow file can be read and believed,
+while an organisation-wide secret injected into every job cannot be read from
+the workflow file at all.
+
+`scripts/ci_assert_incident_refused.py` runs `pytest -m "not docker"` in CI and
+requires exit 4, plus the complement: `-m "not live and not docker"` must still
+collect normally, or the gate would be deleted by the first person it
+inconvenienced.
+
+`data/kb_vectors.db` became tracked. It is a build input — the `Dockerfile`
+copies it — and the only way to regenerate it calls a real embedding API, so
+excluding it would have forced CI to either fail or make live calls. A
+`.gitattributes` pins LF everywhere so a Windows checkout cannot change a
+protected file's hash.
+
+### Found while validating
+
+`scripts/k8s_up.sh` created the credential Secret but never restarted the API.
+`kubectl apply` does not roll a Deployment whose spec is unchanged, and
+replacing a mounted Secret restarts nothing — the platform reads the credential
+table once at start-up. A re-run therefore installed new credentials, handed
+over the matching tokens, and left the pods authenticating against the previous
+table: every request 401, with the cluster and the token file agreeing with each
+other. Found by re-running the script and watching 14 of 23 HTTP proofs fail.
+Fixed with an explicit `rollout restart`; 23/23 after.

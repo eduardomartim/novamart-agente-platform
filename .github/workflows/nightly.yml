@@ -1,0 +1,132 @@
+# The gates that are too slow for a pull request, and the ones that need a
+# cluster.
+#
+# Same rule as CI: no provider credential, and no AGENT_PLATFORM_LIVE, in any
+# job. Live tests are never run by any workflow in this repository -- not on a
+# schedule, not on dispatch, not at all. Running them is a manual act that
+# requires a key and a separate authorisation; see docs/live-verification.md.
+name: Nightly
+
+on:
+  schedule:
+    # 03:00 UTC. Late enough that a day's merges are in, early enough that the
+    # result is waiting in the morning.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OFFLINE_MARKERS: "not live and not docker"
+
+jobs:
+  shuffle:
+    name: shuffled order (seed ${{ matrix.seed }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Order dependence is a real defect class: a test that only passes
+        # because an earlier one left state behind is a false green. Two fixed
+        # seeds rather than a random one, so a failure can be replayed exactly.
+        seed: [4242, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+      - run: python scripts/ci_assert_no_live.py
+      - env:
+          PYTEST_SHUFFLE_SEED: ${{ matrix.seed }}
+        run: python -m pytest -m "$OFFLINE_MARKERS" --junitxml=junit-shuffle-${{ matrix.seed }}.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-shuffle-${{ matrix.seed }}
+          path: junit-shuffle-${{ matrix.seed }}.xml
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+      # Nightly rather than per-PR: it queries an advisory database, so it is
+      # both slow and capable of turning red without anything in this
+      # repository having changed. That is useful information on a schedule and
+      # noise on a pull request.
+      - name: pip-audit
+        run: python -m pip_audit --progress-spinner off --format json --output pip-audit.json
+      - name: Human-readable summary
+        if: always()
+        run: python -m pip_audit --progress-spinner off || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # Dependency names and advisory ids only. No environment, no secrets.
+          name: pip-audit
+          path: pip-audit.json
+
+  cluster:
+    name: kind deployment + HTTP proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,api]"
+      - run: python scripts/ci_assert_no_live.py
+
+      - name: The vector index is present and unmodified
+        run: |
+          test -f data/kb_vectors.db
+          echo "034f53c4a2eb3cc66c9bf4ea6cae14f5f0bc61e1aa4799006eeb1eb8495de66d  data/kb_vectors.db" | sha256sum -c -
+
+      - name: Create the cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: agent-platform
+          wait: 180s
+
+      - name: Build and load the image
+        run: |
+          docker build -t agent-platform:v2.6 .
+          kind load docker-image agent-platform:v2.6 --name agent-platform
+
+      # Both secrets are generated inside the job and piped straight to
+      # kubectl. Nothing is written to the workspace, nothing appears in an
+      # argv, and nothing is uploaded as an artifact. The credential table that
+      # reaches the cluster holds sha256 digests; the tokens themselves stay in
+      # the process that mints them.
+      - name: Deploy
+        run: ./scripts/k8s_up.sh
+        env:
+          IMAGE: agent-platform:v2.6
+
+      - name: HTTP proofs against the running cluster
+        run: python scripts/cluster_proofs.py
+
+      - name: Pod logs carry no credential
+        if: always()
+        run: python scripts/ci_assert_no_secret_in_logs.py
+
+      # Even on failure, and even on cancellation. A leaked cluster is a
+      # leaked runner.
+      - name: Destroy the cluster
+        if: always()
+        run: kind delete cluster --name agent-platform || true

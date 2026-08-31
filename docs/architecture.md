@@ -371,6 +371,30 @@ tool consumes* (CPF, card, phone, IP), preserve the one that a tool acts on
 The control applies to the stub as well as to Gemini. A control that engages in
 only one mode is a control that gets discovered broken in the mode that matters.
 
+### Provider selection, and permission — `llm/`
+
+`build_provider()` decides which provider a caller gets, and since V2.7 it is
+also where permission to use a real one is enforced. Those are two questions
+that used to have one answer:
+
+* a `GEMINI_API_KEY` **selects** the real provider — that has always been true;
+* `AGENT_PLATFORM_LIVE` **authorises** using it — that is new, and separate.
+
+The check sits here rather than in the test runner because this function is the
+one place every path passes through: `AgentPlatform`, the CLI, the dashboard,
+`scripts/build_vector_index.py` and the live fixtures all arrive at it. It
+refuses *above* its own lazy import of the SDK, so an unauthorised process does
+not load the client library, let alone construct a client. `GeminiProvider`
+restates the refusal where the real client is actually made, for anything that
+bypasses the factory.
+
+It is below pytest deliberately. The previous arrangement lived entirely inside
+the test runner — a marker expression — and a `-m` on the command line replaces
+the configured one rather than combining with it, which cost 72 unintended
+calls. A control that a command-line flag can switch off is a control that will
+be switched off by a command nobody read carefully. See
+[live-verification.md](live-verification.md).
+
 ### Cost — `cost/`
 
 The rate card is **dated**, not a flat dictionary:

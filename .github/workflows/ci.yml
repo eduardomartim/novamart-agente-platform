@@ -1,0 +1,228 @@
+# Every gate that is fast enough to run on a pull request.
+#
+# The commands here are the ones a developer runs locally -- not a parallel
+# suite maintained separately, which is how CI and reality drift apart.
+#
+# What is deliberately absent: any provider credential. There is no
+# GEMINI_API_KEY, no OPENAI_API_KEY, no ANTHROPIC_API_KEY, no GOOGLE_API_KEY,
+# and no AGENT_PLATFORM_LIVE in any job below. That is not an oversight to be
+# corrected later; it is the property the live-gate job exists to prove.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only by default. A job that needs more says so itself.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # The safe marker expression, written once. A -m on the command line
+  # REPLACES the one in pyproject.toml rather than combining with it, which is
+  # how "-m not docker" once dropped "not live" and spent 72 unintended
+  # provider calls. Every pytest invocation below uses this.
+  OFFLINE_MARKERS: "not live and not docker"
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - run: python -m ruff check .
+
+  typecheck:
+    name: mypy strict
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # mypy is configured to check the optional extras, so they are installed.
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+      - run: python -m mypy
+
+  offline:
+    name: offline suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+      - name: Confirm no provider credential is present
+        run: python scripts/ci_assert_no_live.py
+      - run: python -m pytest -m "$OFFLINE_MARKERS" --junitxml=junit-offline.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-offline
+          path: junit-offline.xml
+
+  security:
+    name: security suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+      - run: python -m pytest -m "$OFFLINE_MARKERS" tests/security --junitxml=junit-security.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-security
+          path: junit-security.xml
+
+  live-gate:
+    name: live gate holds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,dashboard,api,redis,mcp,postgres]"
+
+      # The assertions this job exists for, run before the suite so a failure
+      # is unambiguous about which property broke.
+      - name: No provider credential and no live authorisation
+        run: python scripts/ci_assert_no_live.py
+
+      - name: The incident command cannot select live tests
+        # Running pytest with "-m not docker" is exactly what happened when 72
+        # unintended calls were made. It must now fail at collection (exit 4)
+        # having executed nothing. A zero exit here is the failure.
+        run: python scripts/ci_assert_incident_refused.py
+
+      - name: The live gate suite
+        run: python -m pytest -m "$OFFLINE_MARKERS" tests/security/test_live_gate.py
+
+  manifests:
+    name: kustomize
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render the manifests
+        run: |
+          kubectl kustomize k8s/ > rendered.yaml
+          test -s rendered.yaml
+      - name: No credential is rendered into the manifests
+        # The Secrets are templates carrying placeholders; a real value
+        # reaching them would be a real value in git.
+        run: |
+          ! grep -qE 'ap_[0-9a-f]{8}_' rendered.yaml
+          ! grep -q 'AGENT_PLATFORM_LIVE' rendered.yaml
+          ! grep -q 'GEMINI_API_KEY' rendered.yaml
+
+  integration:
+    name: redis + postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # Redis 8, not 7: the graph checkpointer uses the query engine (FT.*),
+      # which 8 bundles into core.
+      redis:
+        image: redis:8-alpine
+        ports: ["16379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: dev-only-not-a-secret
+          POSTGRES_DB: agentplatform
+        ports: ["15432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,api,redis,mcp,postgres]"
+
+      # The integration suites skip cleanly when a service is unreachable,
+      # which is right on a laptop and wrong here: this job exists to test
+      # those services, so a skip would be a green run that proved nothing.
+      - name: Assert both services are actually reachable
+        run: python scripts/ci_assert_services.py
+
+      - name: Redis-backed shared state
+        run: python -m pytest -m "$OFFLINE_MARKERS" tests/integration/test_shared_state.py
+      - name: Postgres-backed shared budget
+        run: python -m pytest -m "$OFFLINE_MARKERS" tests/integration/test_shared_budget.py
+      - name: Repository conformance, all three backends
+        run: python -m pytest -m "$OFFLINE_MARKERS" tests/integration/test_repository_conformance.py
+      - name: MCP execution boundary
+        run: python -m pytest -m "$OFFLINE_MARKERS" tests/integration/test_mcp_boundary.py
+
+  container:
+    name: image + container suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # The image is only worth building once the code inside it is known to
+    # lint, typecheck and pass its own suite.
+    needs: [lint, typecheck, offline]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev,api]"
+
+      # The Dockerfile copies it. It is tracked deliberately (see .gitignore)
+      # because the only way to regenerate it calls a real embedding API --
+      # which this workflow must never do.
+      - name: The vector index is present and unmodified
+        run: |
+          test -f data/kb_vectors.db
+          echo "034f53c4a2eb3cc66c9bf4ea6cae14f5f0bc61e1aa4799006eeb1eb8495de66d  data/kb_vectors.db" | sha256sum -c -
+
+      # No build-arg, no secret, no key. The image runs the deterministic stub.
+      - name: docker build
+        run: docker build -t agent-platform:ci .
+
+      - name: Container suite against the real image
+        run: python -m pytest -m "docker and not live" --junitxml=junit-container.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-container
+          path: junit-container.xml

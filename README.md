@@ -664,10 +664,26 @@ authorisation never consults intent. `test_provider_failure_never_executes_a_too
 does the same for every provider failure mode.
 
 ```bash
-python -m ruff check . && python -m mypy && python -m pip_audit
+make gates
 ```
 
-Lint clean, mypy `strict` clean across 60 source files, no known vulnerabilities.
+Runs what a pull request runs: ruff, mypy `strict`, the manifests, the security
+suite, the live gate and the offline suite. Every target spells out
+`-m "not live and not docker"`, which is the point of the `Makefile` — the
+convenient way to run the suite is also the way that cannot select live tests by
+accident.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` on every pull request; `nightly.yml` for the shuffled
+runs, `pip-audit`, and a real `kind` deployment with the 23 HTTP proofs from
+V2.6.
+
+**No workflow holds a provider credential**, and none holds
+`AGENT_PLATFORM_LIVE`. That is asserted at the top of every job rather than
+claimed in the YAML — an organisation-wide secret injected into every job cannot
+be read from a workflow file. One job re-enacts the command that caused 72
+unintended calls and requires it to fail. See [docs/ci.md](docs/ci.md).
 
 ---
 
