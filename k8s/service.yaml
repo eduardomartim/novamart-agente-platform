@@ -1,0 +1,22 @@
+# ClusterIP. No NodePort and no Ingress: the platform has no authentication, so
+# anything that can reach the port can approve a suspended high-risk action.
+# Access during validation is through `kubectl port-forward`, which is
+# deliberate rather than an oversight.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-platform-api
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agent-platform
+
+# Order matters on a first apply: the namespace must exist before anything in
+# it. `secret.example.yaml` and `auth-secret.example.yaml` are deliberately NOT
+# listed -- they are templates with placeholders, and applying them would
+# install a known non-secret as the signing key, or a credential table nobody
+# can authenticate against.
+#
+# Both Secrets must exist before the Deployment will run: the API mounts the
+# credential table and refuses to start without it. That refusal is the design
+# working, not a missing step to route around.
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - redis.yaml
+  - postgres.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - network-policy.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: agent-platform

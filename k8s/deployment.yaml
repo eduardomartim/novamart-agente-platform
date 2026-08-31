@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-platform-api
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: agent-platform
+    app.kubernetes.io/version: "2.5"
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0   # never drop below the current count during a rollout
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-platform
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: agent-platform
+        app.kubernetes.io/version: "2.5"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: agent-platform
+      automountServiceAccountToken: false
+
+      # A run can take a while and a suspended one must not be cut off
+      # mid-flight. Measured worst case was 88s; the process itself stops
+      # accepting and exits within ~1s of SIGTERM.
+      terminationGracePeriodSeconds: 120
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: api
+          image: agent-platform:v2.6
+          # Never: the image is loaded into the node with `kind load`. Pulling
+          # would reach a registry that does not have it and fail confusingly;
+          # this fails immediately and says why.
+          #
+          # Production would pin by digest and pull from a registry.
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: agent-platform-config
+            - secretRef:
+                name: agent-platform-secrets
+                optional: true   # inprocess transport does not need the secret
+
+          # Assembled here rather than in the ConfigMap: `$(VAR)` is expanded
+          # for `env` entries and not for `envFrom` ones, and the value carries
+          # a password, which a ConfigMap should never hold. POSTGRES_PASSWORD
+          # is declared first because expansion only sees names defined above it.
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgresql://agent:$(POSTGRES_PASSWORD)@agent-platform-postgres:5432/agentplatform"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "768Mi" }
+
+          # Startup: generous, because if Redis is not up yet the platform
+          # refuses to construct and the container exits. That is the correct
+          # fail-closed behaviour, and this gives the dependency time to arrive
+          # without liveness killing a pod that is merely waiting.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 45
+
+          # Liveness: is the process alive. It touches no dependency, on
+          # purpose. A liveness probe that checks Redis restarts every replica
+          # at once the moment Redis blips, turning a degradation into an outage.
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Readiness: can this replica do useful work. This one *does* check
+          # the shared backend, because a pod that cannot reach Redis would
+          # enforce a weaker rate limit than configured and could not resume a
+          # confirmation raised elsewhere. It leaves the Service; it is not killed.
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+          lifecycle:
+            preStop:
+              exec:
+                # Let endpoint removal propagate before the process starts
+                # shutting down, so in-flight requests are not sent to a pod
+                # that is already closing.
+                command: ["sleep", "5"]
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/agent-platform
+            - name: tmp
+              mountPath: /tmp
+            # Credentials arrive as a file, not as environment.
+            #
+            # An environment variable is readable through /proc/<pid>/environ,
+            # lands in a crash dump, and is inherited by child processes -- and
+            # this platform spawns one when TOOL_TRANSPORT=mcp. A mounted file
+            # is none of those things, and it is read once at start-up.
+            - name: auth
+              mountPath: /etc/agent-platform/auth
+              readOnly: true
+
+      volumes:
+        - name: auth
+          secret:
+            secretName: agent-platform-auth
+            # 0400: readable by the one uid that needs it, by nobody else.
+            defaultMode: 0400
+            items:
+              - key: keys
+                path: keys
+        # readOnlyRootFilesystem is on, so every writable path is declared.
+        # SQLite is per-pod and dies with the pod: see docs/kubernetes.md.
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

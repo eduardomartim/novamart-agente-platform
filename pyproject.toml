@@ -1,0 +1,142 @@
+[project]
+name = "agent-platform"
+version = "0.1.0"
+description = "Reference platform demonstrating guardrails, policy enforcement, evaluation and observability for multi-agent LLM systems."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+
+dependencies = [
+    "langgraph>=1.2.11,<2.0",
+    "google-genai>=2.20.0,<3.0",
+    "pydantic>=2.13,<3.0",
+    "python-dotenv>=1.0,<2.0",
+    # Vector storage and exact cosine similarity. Present transitively via
+    # pandas already, but pandas is a `dashboard` extra -- the retrieval layer
+    # is core, so it declares what it actually imports rather than relying on
+    # someone else's dependency happening to be installed.
+    "numpy>=1.26,<3.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.62,<2.0",
+    # Imported directly by dashboard/app.py. Streamlit happens to pull it
+    # in today, but depending on a transitive dependency means the app
+    # breaks silently if Streamlit ever drops it.
+    "pandas>=2.0,<3.0",
+]
+api = [
+    # Starlette rather than FastAPI: the core is synchronous, so FastAPI's
+    # async dependency injection buys nothing here, and request validation is
+    # already pydantic, which is a core dependency. This is the smaller
+    # surface for the same boundary.
+    #
+    # Both arrive transitively with streamlit today. Declared here anyway --
+    # depending on someone else's dependency means the API breaks silently if
+    # the dashboard extra ever drops it.
+    "starlette>=0.46,<2",
+    "uvicorn>=0.30,<1",
+]
+redis = [
+    # Shared state for multi-replica deployments. Optional on purpose: without
+    # it the platform runs process-local, which is the default and what the
+    # offline suite exercises.
+    #
+    # `langgraph-checkpoint-redis` is what lets a suspended run resume on a
+    # different replica -- the pending record says which run is waiting, the
+    # checkpoint holds where it had reached. It requires the Redis query engine
+    # (FT.*), so Redis 8+ or Redis Stack, not a bare redis:7.
+    "redis>=7,<8",
+    "langgraph-checkpoint-redis>=0.5,<1",
+]
+postgres = [
+    # Durable storage shared by every replica. Optional: SQLite is the default
+    # and what the offline suite runs on.
+    #
+    # `[binary]` so the image needs no build toolchain; `[pool]` because the
+    # gateway and the ASGI layer both run work on thread pools and a connection
+    # per call would exhaust the server.
+    "psycopg[binary,pool]>=3.2,<4",
+]
+mcp = [
+    # The execution boundary. Optional: `TOOL_TRANSPORT=inprocess` is the
+    # default and needs none of this.
+    #
+    # 2.x specifically -- the 1.x `FastMCP` class was renamed to `MCPServer`
+    # and the APIs changed, so code written against v1 does not run here.
+    "mcp>=2.1,<3",
+]
+dev = [
+    "pytest>=9.1,<10.0",
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<3.0",
+    "pip-audit>=2.7",
+    # Drives the ASGI app in-process, so the API tests exercise the real HTTP
+    # stack without binding a port.
+    "httpx>=0.27,<1",
+]
+
+[project.scripts]
+agent-platform = "agent_platform.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_platform"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S"]
+ignore = ["S101"]  # assert is expected in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]  # hardcoded fake secrets are the point of these tests
+# Confusable and zero-width characters are the attack payload in these tests --
+# homoglyph tool names and hidden-character injection. Flagging them as
+# "ambiguous" is correct in ordinary code and exactly wrong here.
+"tests/security/test_injection_advanced.py" = ["S105", "S106", "RUF001", "RUF003"]
+# Driving the docker CLI and talking to the container over loopback HTTP is the
+# entire point of this file. S607 flags `docker` resolved from PATH, which is
+# how the CLI is invoked; S310 flags urlopen on URLs this file builds itself
+# from a literal scheme and 127.0.0.1. Both are correct defaults elsewhere and
+# nothing but noise here.
+"tests/integration/test_container.py" = ["S607", "S310"]
+
+[tool.mypy]
+# Matches the interpreter the project is developed and tested against. The
+# package itself supports 3.11+ (see requires-python); this is set to 3.12
+# because third-party stubs in the dashboard extra use 3.12-only syntax.
+python_version = "3.12"
+packages = ["agent_platform"]
+mypy_path = "src"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["langgraph.*", "google.genai.*", "streamlit.*", "pandas.*", "numpy.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# -m "not live" keeps the default suite completely offline. The live marker
+# previously claimed to be deselected by default but nothing enforced it.
+addopts = "-q --strict-markers -m 'not live'"
+markers = [
+    "live: requires a real GEMINI_API_KEY and network access; deselected by default via addopts, run explicitly with 'pytest -m live'",
+    "slow: longer-running live checks (a full curated subset sweep)",
+    # Not deselected by default: these build and run the real image, which is
+    # the only thing that can prove the container works, and they skip cleanly
+    # where no docker daemon is reachable. Deselecting them by default would
+    # mean the container is never actually exercised on a machine that can.
+    "docker: builds and runs the real container image; skipped when no docker daemon is available",
+]

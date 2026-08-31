@@ -1,0 +1,46 @@
+# The test suite, run on Linux.
+#
+# Not a way to make failures go away -- a way to run tests that a Windows
+# security policy prevents from running at all.
+#
+# Smart App Control (enforced on the development machine) refuses to load
+# `pyarrow`'s native libraries because they are not Authenticode-signed. Wheels
+# from PyPI generally are not, so reinstalling does not help, and the files
+# carry no Mark-of-the-Web, so unblocking them does nothing either. The policy
+# is correct and stays on; it simply means 25 dashboard tests that render a
+# dataframe cannot execute on that host.
+#
+# They execute here. Same source, same pinned versions, same assertions -- on a
+# platform where a third-party binary is not blocked by a Windows-only policy.
+#
+# Tests that genuinely need a Docker daemon skip themselves cleanly: this
+# container has no socket, which the suite already handles. Redis-backed tests
+# need a reachable server; see the run instructions in docs/kubernetes.md.
+
+FROM python:3.12-slim-trixie
+
+# git is not needed to install; build essentials are avoided by preferring
+# wheels. If a source build were ever required this would fail loudly rather
+# than silently pulling a toolchain into a test image.
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /src
+
+# Dependency metadata first, so the install layer is cached until it changes.
+COPY pyproject.toml README.md LICENSE ./
+COPY src/ src/
+
+RUN python -m pip install --no-cache-dir -e ".[dev,dashboard,api,redis,mcp,postgres]"
+
+# Tests and the data the suite reads are copied at the end: they change most
+# often and should not invalidate the dependency layer.
+COPY tests/ tests/
+COPY dashboard/ dashboard/
+COPY scripts/ scripts/
+COPY data/ data/
+# Streamlit hardening settings -- asserted by tests/security/test_dashboard_disclosure.py
+COPY .streamlit/ .streamlit/
+
+ENTRYPOINT ["python", "-m", "pytest"]

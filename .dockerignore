@@ -1,0 +1,48 @@
+# What may reach the Docker daemon.
+#
+# Deny-by-default: everything is excluded, then the few paths the build
+# genuinely needs are added back. An allow-list is the only version of this
+# file that stays correct -- a deny-list silently starts shipping every new
+# file someone adds to the repo, and the first time that matters is the first
+# time it ships a credential.
+*
+
+# --- what the build actually needs ------------------------------------------
+# The package source and its metadata, to build a wheel.
+!src/
+!pyproject.toml
+!README.md
+!LICENSE
+
+# The resolved, hashed dependency set. Without this the image would be built
+# from version ranges and two builds a week apart could differ.
+!requirements-api.txt
+
+# The persisted vector index. Not needed by demo/stub traffic, which is pure
+# BM25, but hybrid retrieval cannot be demonstrated without it. Copied to an
+# explicit path and pointed at by KB_VECTOR_INDEX_PATH; see the Dockerfile.
+!data/kb_vectors.db
+
+# --- re-excluded, even under the paths added back above ---------------------
+# `*` above does not reach inside an un-ignored directory, so src/ needs its
+# own exclusions.
+src/**/__pycache__/
+src/**/*.pyc
+src/**/*.pyo
+
+# --- never, under any circumstance ------------------------------------------
+# These are already covered by `*`. They are named anyway: this file is read by
+# people deciding whether a secret can reach the daemon, and "it is implied by
+# a wildcard three screens up" is not the answer that question deserves.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+.git/
+.gitignore
+secrets/
+**/secrets/
+.streamlit/

@@ -1,0 +1,9 @@
+# Everything the platform runs lives here, so a default-deny NetworkPolicy has
+# a boundary to be default-deny *within*.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/part-of: agent-platform

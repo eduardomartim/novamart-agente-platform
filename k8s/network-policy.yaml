@@ -1,0 +1,123 @@
+# Default deny, then three explicit allowances.
+#
+# Whether these are *enforced* depends on the CNI, not on the objects existing.
+# kindnet holds RBAC on networkpolicies, which indicates it watches them, but
+# RBAC is not proof -- so enforcement is asserted by a connectivity test rather
+# than claimed here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: agent-platform
+spec:
+  podSelector: {}          # every pod in the namespace
+  policyTypes: [Ingress, Egress]
+---
+# The API accepts traffic on 8000 from inside the namespace. Reaching it from
+# outside goes through `kubectl port-forward`, which talks to the kubelet
+# rather than crossing pod networking, so it is unaffected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: api
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# The API may reach Redis, and DNS. Nothing else -- notably no general internet
+# egress, because in this deployment the platform runs the offline stub and has
+# no provider to call.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: api
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-platform
+              app.kubernetes.io/component: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-platform
+              app.kubernetes.io/component: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Redis accepts only from the API, and initiates nothing. A datastore holding
+# request text and pending approvals has no reason to originate traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: redis
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-platform
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# Postgres accepts only from the API, and initiates nothing. A datastore
+# holding the spend ledger and request history has no reason to originate
+# traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agent-platform
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 5432

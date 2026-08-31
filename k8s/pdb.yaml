@@ -1,0 +1,16 @@
+# Keeps one replica serving during a voluntary disruption -- a node drain, a
+# cluster upgrade. Cheap with two replicas and it makes the intent explicit.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-platform-api
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: api

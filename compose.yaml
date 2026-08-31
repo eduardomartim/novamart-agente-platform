@@ -1,0 +1,183 @@
+# The platform, its shared state and its durable storage.
+#
+# This file earns its place by making the security posture executable rather
+# than documented: read-only root filesystem, dropped capabilities, no
+# privilege escalation, and named volumes for the paths that must persist.
+# Those are easy to claim in prose and easy to get wrong; here they either hold
+# or the container fails to start.
+#
+# Two backing services, each with a job the other cannot do. Redis holds the
+# ephemeral, TTL-bounded state -- the graph checkpoint, pending confirmations,
+# nonces, the rate-limit window, the provider-call ledger. Postgres holds what
+# has to outlive all of that: requests, events, and the recorded spend the
+# budget guard reads. Neither publishes a port.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-platform:v2.6
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+    # Compose reads the project's `.env` automatically for variable
+    # substitution. An earlier version of this file wrote
+    # `GEMINI_API_KEY: "${GEMINI_API_KEY:-}"` intending "pass it through only if
+    # the operator exported one" -- and Compose helpfully filled it in from the
+    # developer's `.env`, so `docker compose up` silently started in LIVE mode
+    # and spent real quota. The comment above it said the opposite.
+    #
+    # Offline is now a property rather than an intention: the key is pinned
+    # empty, which is what selects the deterministic stub. Nothing Compose finds
+    # in a dotfile can change that.
+    #
+    # To run against the real provider, do it deliberately and visibly, outside
+    # this file, so that spending quota is always an explicit act:
+    #   docker run --rm -p 8000:8000 -e GEMINI_API_KEY=... agent-platform:v2.6
+    environment:
+      GEMINI_API_KEY: ""
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+
+      # API credentials. `:?` rather than `:-`: with no value Compose refuses to
+      # start anything and says why, instead of bringing up a container that
+      # crash-loops on the same problem one layer deeper.
+      #
+      # Note this is Compose *substitution*, which is a different mechanism from
+      # `env_file` below and reads the project's `.env` on purpose. The two look
+      # alike and one of them caused a real incident here -- the difference is
+      # that substitution is per-variable and written down, so nothing arrives
+      # that this file did not ask for by name. What it asks for is a table of
+      # sha256 digests, which is not a credential; the tokens themselves live
+      # with their holders and never reach this file, the image, or the repo.
+      #
+      # Mint one with:
+      #   agent-platform auth new-key --principal you --scope runs:write
+      API_AUTH_KEYS: "${API_AUTH_KEYS:?set API_AUTH_KEYS (see .env.example); the API will not serve unauthenticated}"
+      # Shared state. Pointing at the service below rather than at a host port,
+      # because Redis is reachable only on the internal network -- see the
+      # `redis` service for why it publishes nothing.
+      REDIS_URL: "redis://redis:6379/0"
+      # Durable storage. Redis keeps the ephemeral, TTL-bounded state;
+      # Postgres keeps what must outlive it -- requests, events, and the
+      # recorded spend the budget guard reads.
+      DATABASE_URL: "postgresql://agent:dev-only-not-a-secret@postgres:5432/agentplatform"
+
+    # Belt and braces: never let a `.env` beside this file become container
+    # environment by another route.
+    env_file: []
+
+    # The image writes to exactly one directory. Everything else is immutable
+    # at run time, which is the strongest available check that no code path is
+    # quietly depending on a writable install tree.
+    read_only: true
+    volumes:
+      - agent-data:/var/lib/agent-platform
+    tmpfs:
+      # Python and SQLite both expect a usable temp directory even when they do
+      # not end up writing much to it.
+      - /tmp:size=64m,mode=1777
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # No healthcheck here on purpose: the image already defines one, and it
+    # reads ${API_PORT} rather than assuming 8000. Repeating it here would be a
+    # second copy to keep in sync, and the copy that drifts is the one that
+    # reports a healthy container as unhealthy.
+
+    # A request can suspend awaiting human confirmation, and an agent run is not
+    # instant. Give in-flight work room to finish before the process is killed.
+    stop_grace_period: 30s
+
+    restart: unless-stopped
+
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  redis:
+    # Redis 8 rather than 7: the graph checkpointer uses the query engine
+    # (FT.*), which 8 bundles into core. On a bare redis:7 the checkpointer
+    # fails at startup with "unknown command 'FT.INFO'" -- discovered the
+    # direct way, by running it.
+    image: redis:8-alpine
+
+    # No `ports:`. Deliberately. Redis has no authentication configured here,
+    # and it now holds request text and pending approvals, so the only thing
+    # standing between it and anything else is that it is not reachable from
+    # outside this network. Publishing a port would remove that, silently.
+    #
+    # To inspect it during development, go through the network rather than
+    # around it:
+    #   docker compose exec redis redis-cli
+    expose:
+      - "6379"
+
+    # No password here on purpose: a credential written into a file that lives
+    # next to the code is not a credential. Production supplies one through a
+    # secret and sets REDIS_URL accordingly.
+
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    restart: unless-stopped
+
+  postgres:
+    # One instance, with a volume. NOT high availability, and not presented as
+    # such: production would use a managed service or an operator with
+    # replication and failover.
+    image: postgres:17-alpine
+
+    # No `ports:`. It holds request digests, events and the spend ledger, and
+    # the only thing between it and anything else is that it is not reachable
+    # from outside this network.
+    expose:
+      - "5432"
+
+    environment:
+      POSTGRES_DB: agentplatform
+      POSTGRES_USER: agent
+      # A development-only password, in the open, on purpose: a credential
+      # written into a file beside the code is not a credential. Production
+      # supplies one through a secret and sets DATABASE_URL accordingly.
+      POSTGRES_PASSWORD: dev-only-not-a-secret
+
+    volumes:
+      - agent-postgres:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agentplatform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    security_opt:
+      - no-new-privileges:true
+
+    restart: unless-stopped
+
+volumes:
+  agent-data:
+  agent-postgres:

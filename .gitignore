@@ -1,0 +1,45 @@
+# Secrets: never commit real configuration
+.env
+.env.*
+!.env.example
+
+# Local data produced by the demo
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/golden/*.json
+
+# ...except the vector index, which is a build input rather than local data.
+#
+# The production Dockerfile COPYs it, retrieval loads it, and its hash is
+# pinned. Excluding it meant `docker build` could not work from a clean
+# checkout -- and the only way to regenerate it, scripts/build_vector_index.py,
+# calls a real embedding API. So leaving it out would have forced CI to either
+# fail or make live provider calls, which is exactly what the live gate exists
+# to prevent. 176 KB, deterministic, and verified by corpus fingerprint at load.
+!data/kb_vectors.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local tooling config (editor/agent launch profiles)
+.claude/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

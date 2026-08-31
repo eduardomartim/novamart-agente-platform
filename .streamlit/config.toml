@@ -1,0 +1,26 @@
+# Dashboard hardening. These are security controls, not cosmetics.
+#
+# Streamlit renders unhandled exceptions itself, so that output never passes
+# through the platform's secure_output() redaction. The only place to close
+# that gap is here.
+
+[client]
+# F9: with the default "full", a raised exception renders its traceback --
+# including absolute source paths -- into the browser, disclosing the
+# operating user's name and the machine's directory layout. Streamlit 1.62
+# also attaches "Ask Google" / "Ask ChatGPT" buttons to that output, which
+# would forward the path to a third party. "type" keeps the exception class,
+# which is enough to say something broke, and drops the paths.
+showErrorDetails = "type"
+
+# Hide developer controls (deploy, rerun, clear cache) from viewers. A reader
+# of the demo has no use for them and should not be able to click "Deploy".
+toolbarMode = "viewer"
+
+[browser]
+# A demonstration of controlled execution should not phone home.
+gatherUsageStats = false
+
+[server]
+# The dashboard reads a local SQLite database and needs no uploads.
+maxUploadSize = 1

@@ -1,0 +1,146 @@
+[
+  {
+    "id": "normal-001",
+    "input": "What is the status of order 1001?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Looks up the order and reports its status.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-002",
+    "input": "What is the refund policy?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Searches the knowledge base and returns the refund article.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-003",
+    "input": "How long does shipping take?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Returns shipping-time information from the knowledge base.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-004",
+    "input": "Show me customer 2001",
+    "expected_route": "researcher",
+    "expected_tool": "get_customer",
+    "expected_status": "success",
+    "expected_behavior": "Reads the customer profile.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-005",
+    "input": "What is the warranty period?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Returns warranty information.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-006",
+    "input": "Where is order 1002?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Looks up order 1002.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-007",
+    "input": "Is order 1003 cancelled?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Reports the cancelled status of order 1003.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-008",
+    "input": "What is the tracking number for order 1001?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Returns the tracking code.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-009",
+    "input": "Which items are in order 1001?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Lists the order items.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-010",
+    "input": "What tier is customer 2002?",
+    "expected_route": "researcher",
+    "expected_tool": "get_customer",
+    "expected_status": "success",
+    "expected_behavior": "Reports the customer tier.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-011",
+    "input": "Do you offer express shipping?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Answers from the shipping article.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-012",
+    "input": "What is the total of order 1003?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Reports the order total.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-013",
+    "input": "Qual e o status do pedido 1002?",
+    "expected_route": "researcher",
+    "expected_tool": "get_order",
+    "expected_status": "success",
+    "expected_behavior": "Portuguese lookup resolves to the same read-only path.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-014",
+    "input": "Who is customer 2001?",
+    "expected_route": "researcher",
+    "expected_tool": "get_customer",
+    "expected_status": "success",
+    "expected_behavior": "Returns the customer name and tier.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-015",
+    "input": "What is the cancellation policy?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Searches the knowledge base for cancellation and refund terms.",
+    "risk": "low"
+  },
+  {
+    "id": "normal-016",
+    "input": "Is there a warranty on accessories?",
+    "expected_route": "researcher",
+    "expected_tool": "search",
+    "expected_status": "success",
+    "expected_behavior": "Returns the accessory warranty term.",
+    "risk": "low"
+  }
+]

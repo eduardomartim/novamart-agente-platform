@@ -1,0 +1,94 @@
+# Redis for shared state.
+#
+# ONE POD, NO PERSISTENCE, NO REPLICATION. This is not high availability and is
+# not presented as such: it exists so multiple API replicas have somewhere to
+# share a rate-limit window, a provider ledger and pending confirmations. If it
+# dies, in-flight confirmations are lost and the API pods go NotReady until it
+# returns -- which is the correct failure, and a real limitation.
+#
+# Production would use a managed Redis or an operator with replication and
+# failover. See docs/kubernetes.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-platform-redis
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: redis
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-platform
+        app.kubernetes.io/component: redis
+        app.kubernetes.io/part-of: agent-platform
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          # Redis 8: the graph checkpointer uses the query engine (FT.*), which
+          # 8 bundles into core. On redis:7 it fails with "unknown command
+          # 'FT.INFO'" -- found the direct way, by running it.
+          image: redis:8-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-platform-redis
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: redis
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  # ClusterIP, and no NodePort. Redis has no authentication configured here and
+  # now holds request text and pending approvals; the only thing between it and
+  # anything else is that it is not reachable from outside the cluster.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

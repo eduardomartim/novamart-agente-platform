@@ -1,0 +1,42 @@
+# Build context for the TEST image only.
+#
+# BuildKit gives a Dockerfile its own ignore file when one is named after it,
+# so the production `.dockerignore` stays exactly as strict as it is. Running
+# the suite needs tests, fixtures and the dashboard; shipping the API does not,
+# and those two contexts should not be forced to agree.
+#
+# Still deny-by-default, and the credential exclusions below are not relaxed.
+*
+
+!src/
+!tests/
+!dashboard/
+!scripts/
+!data/
+# The dashboard hardening config. A security test asserts its contents, so
+# leaving it out of the context makes that test fail for the wrong reason.
+!.streamlit/
+!pyproject.toml
+!README.md
+!LICENSE
+
+# Caches and build noise, which would bloat the context and can hold stale
+# bytecode that shadows the source being tested.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Never, under any circumstance. Named explicitly even though `*` already
+# covers them: this file is read by someone deciding whether a secret can reach
+# the daemon, and "implied by a wildcard" is not the answer that deserves.
+.env
+.env.*
+*.pem
+*.key
+secrets/
+**/secrets/
+.git/
+.venv/

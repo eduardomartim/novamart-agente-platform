@@ -1,0 +1,58 @@
+# Configuration that is not secret. Anything sensitive lives in the Secret, and
+# the split is deliberate: a ConfigMap is readable by anything with get access
+# to the namespace and shows up in `kubectl describe` output.
+#
+# GEMINI_API_KEY is deliberately absent, here and everywhere. Its absence is
+# what selects the deterministic stub, so this deployment is offline by
+# construction rather than by intention.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-config
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: agent-platform
+data:
+  API_HOST: "0.0.0.0"
+  API_PORT: "8000"
+
+  # Where the credential table is mounted. The table itself is a Secret; this
+  # is only its path, which is not sensitive.
+  #
+  # No API_AUTH_MODE here on purpose. The default is `enforced`, and leaving it
+  # out means nothing in a ConfigMap -- the least protected object in the
+  # namespace -- can turn authentication off. Running open has to be typed into
+  # the Deployment by somebody who meant it.
+  API_AUTH_KEYS_FILE: "/etc/agent-platform/auth/keys"
+
+  # What one caller may do, and what the deployment will absorb in total. Two
+  # controls, two numbers: equal values would let a single caller fill the
+  # shared bucket and deny everybody, which is what per-caller quota exists to
+  # stop. See docs/api.md.
+  REQUESTS_PER_MINUTE: "10"
+  GLOBAL_REQUESTS_PER_MINUTE: "60"
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+
+  # Shared state. Without it each replica would keep its own rate-limit window,
+  # its own provider ledger and its own pending confirmations -- so a limit
+  # configured once would mean N times as much, and a confirmation raised on one
+  # pod could not be approved on another.
+  REDIS_URL: "redis://agent-platform-redis:6379/0"
+
+  # In-process tools. The MCP transport spawns a stdio subprocess per pod, which
+  # works, but this deployment demonstrates replica scaling rather than the
+  # execution boundary -- that is validated in its own suite.
+  TOOL_TRANSPORT: "inprocess"
+
+  # DATABASE_URL is assembled in the Deployment, not here, and the reason is
+  # mechanical: `$(VAR)` expansion happens for values in a container's `env`
+  # list, and NOT for values injected through `envFrom`. Written here it would
+  # reach the process as the literal string "$(POSTGRES_PASSWORD)".
+  #
+  # A ConfigMap is also the wrong home for it -- the URL carries a password.
+
+  # The SQLite fallback path, used only if DATABASE_URL is ever cleared.
+  DATABASE_PATH: "/var/lib/agent-platform/agent_platform.db"

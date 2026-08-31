@@ -1,0 +1,109 @@
+# Durable storage for the platform.
+#
+# ONE INSTANCE, WITH A VOLUME. Not high availability and not presented as such:
+# a StatefulSet of one is still a single point of failure. It exists so that
+# every API replica reads one ledger, which is what makes the daily budget mean
+# one number instead of one per pod.
+#
+# Production would use a managed Postgres or an operator with replication,
+# failover and backups. See docs/state.md.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: agent-platform-postgres
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  serviceName: agent-platform-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-platform
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-platform
+        app.kubernetes.io/component: postgres
+        app.kubernetes.io/part-of: agent-platform
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: agentplatform
+            - name: POSTGRES_USER
+              value: agent
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agent-platform-secrets
+                  key: POSTGRES_PASSWORD
+            # The image initialises into a subdirectory so the volume's
+            # lost+found does not make initdb refuse to start.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Not read-only: Postgres writes its socket, its config and its WAL
+            # inside the container. Stated rather than quietly omitted -- the
+            # API pods *are* read-only, and the difference is deliberate.
+            readOnlyRootFilesystem: false
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1000m", memory: "1Gi" }
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "agent", "-d", "agentplatform"] }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "agent", "-d", "agentplatform"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-platform-postgres
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: postgres
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

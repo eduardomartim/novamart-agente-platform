@@ -1,0 +1,50 @@
+# Autoscaling on CPU.
+#
+# An honest caveat, because it changes how this should be read: CPU is a weak
+# signal for this workload. The platform spends most of a live request blocked
+# on a model call, not burning CPU, so under real traffic this would scale later
+# than it should. The right signal is queue depth, which needs KEDA or a custom
+# metrics adapter -- out of scope here.
+#
+# What it does demonstrate, and what is actually validated: the HPA reads real
+# metrics from metrics-server and acts on them. Under synthetic load the stub
+# path *does* consume CPU (BM25, pydantic, JSON), so a scale-up is observable.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-platform-api
+  namespace: agent-platform
+  labels:
+    app.kubernetes.io/name: agent-platform
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-platform-api
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      # React quickly enough to be observable in a demonstration, without
+      # flapping on a single burst.
+      stabilizationWindowSeconds: 15
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      # Slow on the way down: shedding a replica that is mid-request costs a
+      # request, and the platform's requests are not cheap.
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
