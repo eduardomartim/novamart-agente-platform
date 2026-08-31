@@ -112,6 +112,8 @@ ignore = ["S101"]  # assert is expected in tests
 # whole job, and pinning an absolute path would break every machine but one.
 "scripts/cluster_proofs.py" = ["S607"]
 "scripts/ci_assert_no_secret_in_logs.py" = ["S607"]
+# Same again: `git` from PATH is how git is invoked.
+"tests/security/test_protected_baseline.py" = ["S607"]
 
 [tool.mypy]
 # Matches the interpreter the project is developed and tested against. The

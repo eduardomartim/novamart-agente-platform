@@ -145,6 +145,33 @@ jobs:
           ! grep -q 'AGENT_PLATFORM_LIVE' rendered.yaml
           ! grep -q 'GEMINI_API_KEY' rendered.yaml
 
+  protected-files:
+    name: protected baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # The manifest is in sha256sum's own format, so this is the whole gate:
+      # raw bytes compared with nothing in between, no interpreter, no
+      # dependency. It names any file that diverged and exits non-zero.
+      #
+      # The hashes describe the LF content Git stores. A checkout honours
+      # .gitattributes (`* text=auto eol=lf`), so this is exact here. On a
+      # Windows working tree, which can hold CRLF for the same files, use
+      # `make protected` -- see scripts/check_protected.py for why that
+      # difference is not a change to the file.
+      - name: Verify the protected files
+        run: sha256sum -c PROTECTED.sha256
+
+      # The manifest must not quietly become empty or partial. `sha256sum -c`
+      # reports success on a file listing nothing at all.
+      - name: The manifest still covers twelve files
+        run: |
+          count=$(grep -cE '^[0-9a-f]{64}  ' PROTECTED.sha256)
+          echo "entries: $count"
+          test "$count" -eq 12
+
   integration:
     name: redis + postgres
     runs-on: ubuntu-latest
@@ -197,7 +224,7 @@ jobs:
     timeout-minutes: 25
     # The image is only worth building once the code inside it is known to
     # lint, typecheck and pass its own suite.
-    needs: [lint, typecheck, offline]
+    needs: [lint, typecheck, offline, protected-files]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

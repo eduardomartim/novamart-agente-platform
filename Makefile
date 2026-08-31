@@ -13,7 +13,7 @@
 PYTHON ?= python
 OFFLINE_MARKERS := not live and not docker
 
-.PHONY: help lint typecheck test security manifests container audit gates live-gate
+.PHONY: help lint typecheck test security manifests container audit gates live-gate protected
 
 help:
 	@echo "make lint       ruff"
@@ -21,6 +21,7 @@ help:
 	@echo "make test       the offline suite"
 	@echo "make security   the security suite"
 	@echo "make live-gate  the live gate, including the incident re-enactment"
+	@echo "make protected  verify the 12 protected files against PROTECTED.sha256"
 	@echo "make manifests  kustomize build"
 	@echo "make container  docker build + the container suite"
 	@echo "make audit      pip-audit"
@@ -47,6 +48,13 @@ live-gate:
 	$(PYTHON) scripts/ci_assert_incident_refused.py
 	$(PYTHON) -m pytest -m "$(OFFLINE_MARKERS)" tests/security/test_live_gate.py
 
+# Cross-platform on purpose. CI runs `sha256sum -c PROTECTED.sha256`, which is
+# stronger -- raw bytes, no interpreter. This wrapper exists because a Windows
+# working tree can hold CRLF where Git holds LF, and a gate that fails on a
+# clean tree is a gate people learn to ignore.
+protected:
+	$(PYTHON) scripts/check_protected.py
+
 manifests:
 	kubectl kustomize k8s/ > /dev/null && echo "manifests render"
 
@@ -57,4 +65,4 @@ audit:
 	$(PYTHON) -m pip_audit --progress-spinner off
 
 # The pull-request set, in the order that fails fastest.
-gates: lint typecheck manifests security live-gate test
+gates: lint typecheck protected manifests security live-gate test
