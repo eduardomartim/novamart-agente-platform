@@ -610,19 +610,24 @@ real tools.
 ## Testing
 
 ```bash
-python -m pytest
+make test
 ```
 
-**716 tests. No network, no API key, fully deterministic.** Live tests are
-deselected by default configuration, not by convention.
+**1493 tests. No network, no API key, fully deterministic.** Measured on Linux;
+25 dashboard tests skip on a Windows host, where an OS policy blocks `pyarrow`'s
+unsigned native libraries.
 
-- `tests/unit/` — 161 tests: policy, risk, tools, dataset, cost, security primitives, evaluator, drift, and the Gemini provider against a faked SDK
-- `tests/integration/` — 129 tests: the graph pipeline, the gateway, and every dashboard page rendered against an empty database, a seeded one, and each failure state (provider failure, resource ceiling, policy denial, pending confirmation)
-- `tests/security/` — 286 adversarial tests: authorization, policy bypass, prompt injection (EN/PT, obfuscated, combining-mark), untrusted-content fencing, gateway bypass, confirmation integrity, secret leakage, prompt egress, error-message disclosure, provider failure, abuse limits, and concurrency
-- `tests/live/` — 25 tests against the real API (13 smoke + 11 adversarial + 1 `slow` sweep)
+The target spells out `-m "not live and not docker"`. That is not decoration: a
+`-m` on the command line **replaces** the one in `pyproject.toml` rather than
+combining with it, and `pytest -m "not docker"` once dropped `not live` and
+spent 72 unintended provider calls. Live tests are now deselected by a
+structural barrier rather than by a filter — see
+[docs/live-verification.md](docs/live-verification.md).
 
-One integration test is skipped by design: an empty-state assertion that does
-not apply to the request form.
+- `tests/unit/` — policy, risk, tools, dataset, cost, security primitives, evaluator, drift, and the Gemini provider against a faked SDK
+- `tests/integration/` — the graph pipeline, the gateway, the HTTP boundary, the MCP execution boundary, repository conformance across three backends, shared state and shared budget, and every dashboard page rendered against an empty database, a seeded one, and each failure state
+- `tests/security/` — **706 adversarial tests**: authorization, policy bypass, prompt injection (EN/PT, obfuscated, combining-mark), untrusted-content fencing, gateway bypass, confirmation integrity, secret leakage, prompt egress, error-message disclosure, provider failure, abuse limits, concurrency, API authentication, actor attestation, per-principal quota, the live gate, and the protected-file baseline
+- `tests/live/` — 22 tests against the real API. They need a key **and** a separate authorisation, and no workflow runs them.
 
 ### Order independence
 

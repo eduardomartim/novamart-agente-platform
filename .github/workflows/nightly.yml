@@ -82,6 +82,15 @@ jobs:
     name: kind deployment + HTTP proofs
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Set at job level so all three steps agree on one path.
+      #
+      # k8s_up.sh defaults this to `mktemp`, which is a shell variable inside
+      # that step and gone by the next one -- so the proofs and the log check
+      # would both look for a token file that, from their point of view, was
+      # never written. Under runner.temp rather than the workspace: nothing
+      # there can be picked up by an artifact upload.
+      TOKENS_OUT: ${{ runner.temp }}/agent-platform-tokens.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -11,9 +11,9 @@ offline suite                        pip-audit
 security suite                       kind: deploy + 23 HTTP proofs
 live gate holds
 kustomize
-redis + postgres                     Never, in any workflow
-image + container suite              ─────────────────────────
-                                     live provider tests
+protected baseline                   Never, in any workflow
+redis + postgres                     ─────────────────────────
+image + container suite              live provider tests
 ```
 
 ## What no job has
@@ -100,12 +100,29 @@ is the choice that keeps CI honest.
 | `security` | — | 15 min | ~680 tests; JUnit artifact |
 | `live-gate` | — | 15 min | the incident re-enactment |
 | `manifests` | — | 5 min | renders, then greps for credential shapes |
+| `protected-files` | — | 5 min | `sha256sum -c PROTECTED.sha256`, plus a count check |
 | `integration` | — | 20 min | Redis 8 and Postgres 17 as services |
-| `container` | lint, typecheck, offline | 25 min | builds the real image |
+| `container` | lint, typecheck, offline, protected-files | 25 min | builds the real image |
 
 Only `container` waits on anything: the image is worth building once the code
-inside it is known to lint, typecheck and pass its own suite. Everything else
-runs in parallel.
+inside it is known to lint, typecheck, pass its own suite, and still match the
+protected baseline. Everything else runs in parallel.
+
+### The protected baseline
+
+Twelve files carry a pinned SHA-256 in `PROTECTED.sha256`: the policy engine
+and its rules, the gateway's execution path, the simulated dataset, the graph,
+the execution grant, the MCP server, the repository contract and its SQLite
+implementation, the shared-state backend, the production Dockerfile, and the
+vector index. They are the files where a change is either a mistake or a
+decision somebody has to make deliberately.
+
+The manifest is in `sha256sum`'s own format, so the gate needs no script and no
+interpreter. A second step asserts it still lists twelve entries, because
+`sha256sum -c` reports success on a manifest that lists nothing at all.
+
+It never restores anything. Re-pinning is a decision to record, not a file to
+regenerate.
 
 ### A skip is not a pass
 

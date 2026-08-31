@@ -334,4 +334,5 @@ them. What is not yet demonstrated is that behaviour *under load*: horizontal
 scaling is possible, not proven.
 
 There is no message queue, no external database, no service mesh and no
-orchestrator here. MCP and Kubernetes are not implemented.
+orchestrator in this document's scope. Both arrived later: MCP in V2.3, and
+Kubernetes with an HPA in V2.4.

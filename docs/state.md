@@ -233,4 +233,7 @@ behaviours wearing one name.
 - Horizontal scaling is now *possible*. It is not yet *demonstrated* under load,
   and no orchestrator, service mesh or autoscaler exists here.
 
-MCP and Kubernetes are **not** part of this phase and are not implemented.
+MCP and Kubernetes were not part of the phase this document was written for.
+Both exist now: the execution boundary moved behind a real MCP server in V2.3
+(see [execution-boundary.md](execution-boundary.md)) and the platform runs on
+Kubernetes as of V2.4 (see [kubernetes.md](kubernetes.md)).
