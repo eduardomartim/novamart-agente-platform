@@ -59,10 +59,17 @@ def call(port: int, path: str, token: str | None = None, scheme: str = "https"):
         headers["authorization"] = f"Bearer {token}"
     url = f"{scheme}://127.0.0.1:{port}{path}"
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 - literal scheme
+
+    # Redirects are the thing under test, not something to follow. The
+    # controller answers plain HTTP with a 308 to https://agent-platform.local,
+    # a hostname that does not resolve -- so following it fails on DNS and the
+    # assertion never sees the status it came to check.
+    opener = urllib.request.build_opener(
+        _NoRedirect,
+        urllib.request.HTTPSHandler(context=context),
+    )
     try:
-        with urllib.request.urlopen(  # noqa: S310
-            request, timeout=60, context=context if scheme == "https" else None
-        ) as response:
+        with opener.open(request, timeout=60) as response:
             raw = response.read()
             body = json.loads(raw) if raw[:1] in (b"{", b"[") else raw.decode()
             return response.status, body, response.headers
@@ -72,6 +79,13 @@ def call(port: int, path: str, token: str | None = None, scheme: str = "https"):
             return exc.code, json.loads(raw), exc.headers
         except ValueError:
             return exc.code, raw.decode(), exc.headers
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Return the redirect instead of following it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def peer_certificate(port: int) -> dict:
