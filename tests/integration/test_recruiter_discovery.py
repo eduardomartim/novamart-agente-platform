@@ -94,79 +94,79 @@ def test_1_which_company_is_being_simulated(seeded):
 
 @pytest.mark.slow
 def test_2_that_it_is_a_simulation_not_a_real_business(seeded):
-    assert "simulat" in text_of(render(seeded)).lower()
+    assert "simula" in text_of(render(seeded)).lower()
 
 
 @pytest.mark.slow
 def test_3_what_problem_the_product_solves(seeded):
     body = text_of(render(seeded)).lower()
-    assert "orchestrat" in body
+    assert "orquestra" in body
     assert "policy" in body
 
 
 @pytest.mark.slow
 def test_4_what_data_exists(seeded):
     """Company must cover all four entity families, not just two."""
-    body = text_of(render(seeded, "Company")).lower()
-    for entity in ("customer", "order", "ticket", "product"):
-        assert entity in body, f"Company never mentions {entity}s"
+    body = text_of(render(seeded, "Empresa")).lower()
+    for entity in ("cliente", "pedido", "ticket", "produto"):
+        assert entity in body, f"Empresa nunca menciona {entity}s"
 
 
 @pytest.mark.slow
 def test_5_what_can_be_tested_against_that_data(seeded):
     """Seeing rows is not the same as knowing what to do with them."""
-    body = text_of(render(seeded, "Company"))
-    assert "What you can test" in body, (
-        "Company shows data but never says what a visitor can try"
+    body = text_of(render(seeded, "Empresa"))
+    assert "O que você pode testar" in body, (
+        "Empresa mostra dados mas nunca diz o que o visitante pode tentar"
     )
 
 
 @pytest.mark.slow
 def test_6_real_ids_are_visible_as_context(seeded):
-    body = text_of(render(seeded, "Data explorer"))
+    body = text_of(render(seeded, "Empresa"))
     for marker in ("CUS-2001", "ORD-1001", "TKT-4001", "SKU-"):
         assert marker in body, f"{marker} is not discoverable"
 
 
 @pytest.mark.slow
 def test_7_which_agents_exist_and_who_the_authority_is(seeded):
-    body = text_of(render(seeded, "Agents"))
+    body = text_of(render(seeded, "Arquitetura"))
     for role in demo.AGENT_ROLES:
         assert role["title"] in body
-    assert "not an agent" in body.lower()
+    assert "não é um agente" in body.lower()
 
 
 @pytest.mark.slow
 def test_8_what_questions_can_be_asked(seeded):
-    body = text_of(render(seeded, "Try a request"))
+    body = text_of(render(seeded, "Orquestrador"))
     assert any(q in body for q, _ in demo.READ_ONLY_EXAMPLES)
 
 
 @pytest.mark.slow
 def test_9_what_security_can_be_tried(seeded):
-    body = text_of(render(seeded, "Demo scenarios"))
+    body = text_of(render(seeded, "Segurança"))
     assert any(q in body for q, _ in demo.SECURITY_EXAMPLES)
     assert "LEVEL 5" in body
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("page", ["Try a request", "Demo scenarios"])
+@pytest.mark.parametrize("page", ["Visão geral", "Orquestrador"])
 def test_10_how_stub_and_live_differ(seeded, page):
     """The honest version: the model decides routing, not the prose."""
     body = text_of(render(seeded, page)).lower()
-    assert "stub" in body or "simulation" in body
+    assert "stub" in body or "simula" in body
     assert "live" in body
-    assert "route" in body or "tool" in body, (
+    assert "rota" in body or "ferramenta" in body, (
         f"{page} never says what the model actually decides"
     )
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("page", ["Start here", "Try a request"])
+@pytest.mark.parametrize("page", ["Visão geral", "Orquestrador"])
 def test_11_that_gemini_usage_is_capped(seeded, page):
     """The budget is real engineering; a visitor should be able to see it."""
     body = text_of(render(seeded, page)).lower()
-    assert "capacity" in body or "budget" in body, (
+    assert "capacidade" in body or "limite" in body, (
         f"{page} never reveals that provider usage is capped"
     )
 
@@ -176,17 +176,28 @@ def test_11_that_gemini_usage_is_capped(seeded, page):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "page", ["Start here", "Company", "Data explorer", "Agents", "Try a request"]
+    "page", ["Visão geral", "Empresa", "Orquestrador", "Segurança", "Arquitetura"]
 )
 def test_no_page_claims_an_unbuilt_capability(seeded, page):
-    """Roadmap words must never appear as though they were implemented."""
+    """Roadmap words must never appear as though they were implemented.
+
+    The list is the things this project decided *not* to build, and it is not
+    the list this test started with: vector retrieval and Kubernetes were
+    roadmap words when it was written and are shipped as of V3.0, so asserting
+    their absence would now be asserting a lie. These four are recorded as
+    deliberate omissions in docs/release-readiness.md.
+    """
     body = text_of(render(seeded, page)).lower()
-    for unbuilt in ("vector database", "kubernetes", "retrieval-augmented"):
+    # Only words that could not appear except as a claim. "multi-tenancy" is
+    # deliberately absent from this list: it appears on the landing page *in
+    # the limitations block*, which is the honesty this test protects, not a
+    # violation of it.
+    for unbuilt in ("opentelemetry", "alembic", "distributed tracing"):
         assert unbuilt not in body, f"{page} claims {unbuilt!r}, which does not exist"
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("page", ["Start here", "Company", "Try a request"])
+@pytest.mark.parametrize("page", ["Visão geral", "Empresa", "Orquestrador"])
 def test_no_page_leaks_internals(seeded, page):
     body = text_of(render(seeded, page)).lower()
     # Named technologies are fine -- the landing page names SQLite precisely to
@@ -203,7 +214,7 @@ def test_no_page_leaks_internals(seeded, page):
 @pytest.mark.slow
 def test_the_budget_figures_shown_are_the_real_ones(seeded):
     """The displayed cap must be the enforced cap, not a decorative number."""
-    body = text_of(render(seeded, "Try a request"))
+    body = text_of(render(seeded, "Orquestrador"))
     assert str(demo_budget.LIVE_CALL_BUDGET) in body
 
 

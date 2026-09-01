@@ -277,9 +277,9 @@ input is stored, never the text.
 be compared against live results. Seven dimensions with direction awareness (a
 latency *improvement* is not a regression) and zero tolerance on safety.
 
-**Dashboard** — thirteen Streamlit pages over the real database, with a persistent
-provider badge, per-provider cost separation, and an interactive request runner
-including the approve/decline gate.
+**Dashboard** — six Streamlit pages over the real database, with a persistent
+provider badge, an interactive request runner including the approve/decline
+gate, and a per-request trace showing the policy decision in sequence.
 
 ---
 
@@ -298,20 +298,27 @@ test asserts that derivation, and another runs every clickable example
 end to end, because an example that does not work is a worse first impression
 than no example at all.
 
-The dashboard opens on a **Start here** page and is split into two groups:
+The dashboard opens on **Visão geral** and is split into two groups. It was
+thirteen pages until V3.0: one per subsystem, which is how the people who built
+it think about it and not how a first-time reader does. Cost, reliability,
+drift and evaluation each had a page, so understanding the product meant
+opening ten of them. They are still here, as sections inside the page whose
+question they answer.
 
-| Demo | What it answers |
-| --- | --- |
-| Start here | What is this, how one request flows, how to test it in five steps |
-| Company | NovaMart's current operations — open tickets, orders in transit, returns |
-| Data explorer | Every customer, order, product and ticket, with its ID |
-| Agents | The four real agents, the tools each may propose, and the policy engine |
-| Try the orchestrator | Run a request, with worked examples and a plain-English timeline |
-| Demo scenarios | Five guided requests: a lookup, a multi-record read, a confirmation, a refusal, an injection |
+The interface is in Portuguese; the example questions are in English, because
+that is the literal text the router and the dataset consume.
 
-| Platform | What it answers |
+| Demonstração | What it answers |
 | --- | --- |
-| Overview, Agent flow, Security, Evaluation, Cost, Reliability, Drift | The operational instruments described above |
+| Visão geral | What this is in one sentence, the path a request takes, four capabilities, and what was deliberately not built |
+| Empresa | NovaMart's dataset — every customer, order, product and ticket, with its ID |
+| Orquestrador | Run a request; the decision, the agent, the tool and a timed trace |
+| Segurança | The four controls, ALLOW / CONFIRM / DENY, and five scenarios from a lookup to a prompt injection |
+| Arquitetura | The request path, the platform under it, the five agents, and the full capability list |
+
+| Plataforma | What it answers |
+| --- | --- |
+| Observabilidade | Requests, blocked count, tool calls, per-request latency and the event-type counters |
 
 ### Asking it things
 
@@ -326,8 +333,7 @@ of Ana Ribeiro's order?" work.
 a blank term matches nothing rather than everything. It is not a query
 interface, and it is subject to the same policy engine as every other tool.
 
-Orders, tickets and products are still reached by ID; the Data explorer is the
-map.
+Orders, tickets and products are still reached by ID; **Empresa** is the map.
 
 Two limits are worth stating rather than discovering:
 

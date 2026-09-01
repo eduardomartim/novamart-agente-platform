@@ -93,6 +93,21 @@ A 15-minute-old approval should not execute against state that may have moved
 on. Expiry is checked at resume time and the action is refused, never run.
 """
 
+DEFAULT_DEMO_REQUESTS_PER_MINUTE: Final[int] = 60
+"""Per-caller ceiling when nothing sets one, which in practice means the demo.
+
+It was 10, sized for a deployment. A visitor clicking through the dashboard's
+own worked examples makes more requests than that in a minute, so the control
+that exists to stop abuse was stopping the demonstration instead -- and it
+surfaced as a refusal, which reads like the product is broken.
+
+Sixty is still a limit and still demonstrable: it binds well before anything a
+person can do by hand, and `tests/integration/test_scale.py` exercises the
+limiter directly rather than relying on this number. Deployments set their own
+value: `k8s/configmap.yaml` keeps 10, which is the figure that matters where
+there is more than one caller.
+"""
+
 DEFAULT_GLOBAL_LIMIT_MULTIPLIER: Final[int] = 10
 """How much headroom the deployment-wide ceiling has over one caller's.
 
@@ -336,7 +351,9 @@ class Settings:
             recursion_limit=_get_int("RECURSION_LIMIT", 15, minimum=1),
             llm_timeout=_get_float("LLM_TIMEOUT", 30.0, minimum=0.1),
             tool_timeout=_get_float("TOOL_TIMEOUT", 10.0, minimum=0.1),
-            requests_per_minute=_get_int("REQUESTS_PER_MINUTE", 10, minimum=1),
+            requests_per_minute=_get_int(
+                "REQUESTS_PER_MINUTE", DEFAULT_DEMO_REQUESTS_PER_MINUTE, minimum=1
+            ),
             requests_per_hour=_get_int("REQUESTS_PER_HOUR", 100, minimum=1),
             daily_budget_usd=_get_decimal("DAILY_BUDGET", "1.00"),
             max_request_cost_usd=_get_decimal("MAX_REQUEST_COST", "0.05"),

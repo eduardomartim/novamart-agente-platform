@@ -146,7 +146,7 @@ def test_the_message_explains_itself_without_jargon(repository):
     message = demo_budget.budget_state(repository, live=True).message
     assert message
     lowered = message.lower()
-    assert "limit" in lowered or "budget" in lowered
+    assert "limite" in lowered or "capacidade" in lowered
     for jargon in ("gemini_api_key", "429", "resource_exhausted", "traceback"):
         assert jargon not in lowered
 
@@ -211,8 +211,8 @@ def test_the_exhausted_message_is_honest_about_whose_fault_it_is(repository):
     """The provider is fine. We chose not to call it. Say that."""
     _record(repository, demo_budget.LIVE_CALL_BUDGET)
     message = demo_budget.budget_state(repository, live=True).message.lower()
-    assert "capacity" in message or "budget" in message
-    for dishonest in ("unavailable", "provider is down", "outage", "error"):
+    assert "capacidade" in message or "limite" in message
+    for dishonest in ("indisponível", "provedor caiu", "fora do ar", "erro"):
         assert dishonest not in message, (
             f"the message blames the provider ({dishonest!r}) for our own limit"
         )

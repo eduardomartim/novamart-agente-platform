@@ -42,6 +42,10 @@ def test_empty_registry_is_usable():
 def test_permitted_names_match_the_matrix(registry):
     assert registry.permitted_names(AgentName.ROUTER) == ()
     researcher = set(registry.permitted_names(AgentName.RESEARCHER))
+    # Exhaustive on purpose: a tool that quietly enters the researcher's reach
+    # fails here rather than being noticed later. The second group reads the
+    # dataset in aggregate -- counts, totals and rankings -- and is read-only
+    # for the same reason the first group is.
     assert researcher == {
         "search",
         "get_order",
@@ -49,6 +53,12 @@ def test_permitted_names_match_the_matrix(registry):
         "find_customer",
         "list_customer_orders",
         "get_ticket",
+        "count_customers",
+        "revenue_total",
+        "list_orders",
+        "top_customers",
+        "open_tickets",
+        "business_overview",
     }
     executor = set(registry.permitted_names(AgentName.EXECUTOR))
     assert "update_record" in executor and "send_email" in executor

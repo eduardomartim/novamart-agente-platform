@@ -19,6 +19,13 @@ Recorded in order:
 > Earlier sections are deliberately left as written rather than retro-edited, so the
 > record shows what was true at each point — §13 in particular is superseded by
 > §15 and says so.
+>
+> The same applies to the dashboard. Sections here describe a **thirteen-page,
+> English interface** with pages named *Start here*, *Try a request* and
+> *Demo scenarios*. That interface was replaced in V3.0 by six Portuguese
+> pages; the audits below are the record of testing the interface as it stood,
+> not a description of the one that ships. The current interface is documented
+> in the README.
 
 > **Action required:** §16.6 records an API key that was exposed in terminal
 > output during Phase 3 testing. Rotate it.
@@ -2442,3 +2449,54 @@ over the matching tokens, and left the pods authenticating against the previous
 table: every request 401, with the cluster and the token file agreeing with each
 other. Found by re-running the script and watching 14 of 23 HTTP proofs fail.
 Fixed with an explicit `rollout restart`; 23/23 after.
+
+---
+
+## §39 The protected baseline was changed, on purpose (V3.0 P0)
+
+`src/agent_platform/orchestration/graph.py` is one of the twelve protected
+files. It was modified. This section is the record of that decision, because a
+baseline that can be regenerated quietly is not a control.
+
+**Why the change was necessary.** A read-only audit found that every aggregate
+business question — "how many customers do we have?", "what is the total value
+of all orders?" — was answered with a confident sentence about one arbitrary
+record, reported as `success`. Two of the defects behind that live in this
+file, and nowhere else:
+
+* `_summarise_output` renders a tool result by matching the *shape* of each
+  record tool in turn, and falls through to `str(output)` for anything else. A
+  new aggregate tool would have put a raw Python dict on screen. The function
+  is module-private and has no injection point, so no non-protected module
+  could extend it.
+* the no-context branch of `_respond` returned
+  `("No action was required for this request.", "success")`. A question nothing
+  could answer therefore came back as a success with an English non-answer.
+
+**What was changed — two edits, nothing else.**
+
+1. A `summary` branch at the top of `_summarise_output`: a tool that supplies
+   its own sentence has it rendered, and the structured payload still reaches
+   the trace. One rule for every future tool, instead of one branch per tool.
+2. The no-context branch now returns an honest refusal in the interface
+   language, with status `declined` rather than `success`.
+
+The diff is 17 insertions and 2 deletions. Nothing else in the file was
+touched, and the other eleven protected files are byte-for-byte unchanged —
+`check_protected.py` reported exactly `1 of 12` before the baseline was
+updated, which is the evidence that the change was contained.
+
+**The baseline.** One line of `PROTECTED.sha256` was rewritten:
+
+```
+old  b813650080c02fdc01a21bb3e0aa5b1da962a4f54a6c874111022e85e1f9f18c
+new  f7f00c700241ccfb7922bf5672b61434a5c9fcc5eb1e4f9a699a915d65a8db67
+```
+
+The gate itself was not weakened, disabled or bypassed: the new hash is checked
+by the same script, in the same CI job, and `12/12` passes on the new content.
+The control did its job — it made an intended change visible and forced it to
+be authorised and written down, which is the whole point of having it.
+
+Authorised explicitly by the project owner before implementation, after a
+read-only audit reported the collision and offered three options.

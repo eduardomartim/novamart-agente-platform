@@ -28,19 +28,12 @@ from streamlit.testing.v1 import AppTest
 APP = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
 
 PAGES = [
-    "Start here",
-    "Company",
-    "Data explorer",
-    "Agents",
-    "Try a request",
-    "Demo scenarios",
-    "Overview",
-    "Agent flow",
-    "Security",
-    "Evaluation",
-    "Cost",
-    "Reliability",
-    "Drift",
+    "Visão geral",
+    "Empresa",
+    "Orquestrador",
+    "Segurança",
+    "Arquitetura",
+    "Observabilidade",
 ]
 
 #: Streamlit reruns the whole script per interaction, and this app seeds nothing
@@ -146,10 +139,10 @@ def test_every_page_renders_with_seeded_data(page, seeded_db):
 def test_data_pages_explain_themselves_when_empty(page, empty_db):
     """No page may render an unexplained blank.
 
-    "Try a request" is exempt: it is a form, so an empty database is its
+    "Orquestrador" is exempt: it is a form, so an empty database is its
     normal resting state and the form itself is the content.
     """
-    if page == "Try a request":
+    if page == "Orquestrador":
         pytest.skip("a form is not an empty state")
     app = _run(empty_db, page)
     body = " ".join(
@@ -159,17 +152,19 @@ def test_data_pages_explain_themselves_when_empty(page, empty_db):
 
 
 @pytest.mark.slow
-def test_empty_evaluation_page_does_not_send_the_reader_in_a_circle(empty_db):
-    """Regression: the generic 'run demo' hint was appended to every page.
+def test_an_empty_page_names_the_command_that_actually_fills_it(empty_db):
+    """Regression: a generic hint was once appended to every page, telling a
+    reader to run something that could not fix what they were looking at.
 
-    ``agent-platform demo`` records no evaluation run, so on this page that
-    hint tells the reader to run a command that cannot fix what they are
-    looking at.
+    The assertion is the same property as before, against the page that now
+    exists: Observabilidade is populated by traffic, and ``agent-platform demo``
+    is what produces traffic -- so here that hint is the correct one.
     """
-    app = _run(empty_db, "Evaluation")
+    app = _run(empty_db, "Observabilidade")
     joined = " ".join(el.value for el in app.info)
-    assert "agent-platform eval" in joined
-    assert "agent-platform demo" not in joined
+    assert "agent-platform demo" in joined, (
+        "the empty state must name the command that populates this page"
+    )
 
 
 @pytest.mark.slow
@@ -194,15 +189,15 @@ def test_pages_are_isolated_from_a_previously_loaded_database(seeded_db, empty_d
     and the empty-state assertions pass or fail depending purely on the order
     tests happened to run in.
     """
-    seeded = _run(seeded_db, "Overview")
+    seeded = _run(seeded_db, "Observabilidade")
     seeded_body = " ".join(el.value for el in seeded.metric)
     assert seeded_body.strip(), "the seeded database rendered no metrics"
 
-    empty = _run(empty_db, "Overview")
+    empty = _run(empty_db, "Observabilidade")
     empty_body = " ".join(
         [el.value for el in empty.info] + [el.value for el in empty.markdown]
     )
-    assert "No requests" in empty_body, (
+    assert "Nenhuma requisição registrada" in empty_body, (
         "the empty database did not render its empty state; the previous "
         "run's platform is still cached"
     )

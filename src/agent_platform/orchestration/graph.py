@@ -556,9 +556,14 @@ def _compose_response(state: AgentState) -> tuple[str, str]:
     if errors:
         return f"The request could not be completed: {errors[-1]}", "failed"
 
+    # Nothing ran and nothing was retrieved. That is not a completed request,
+    # and reporting `success` here is how an unanswerable question came back
+    # looking answered. The status says so and the sentence says why.
     return (
-        "No action was required for this request.",
-        "success",
+        "Não consigo responder essa pergunta com os dados e as ferramentas "
+        "disponíveis nesta demonstração. Consigo consultar clientes, pedidos, "
+        "tickets e a base de conhecimento — inclusive totais e rankings.",
+        "declined",
     )
 
 
@@ -598,6 +603,16 @@ def _summarise_output(output: Any) -> str:
     if output is None:
         return "No data was returned."
     if isinstance(output, dict):
+        # A tool that wrote its own sentence wins over every rule below. The
+        # branches that follow each know the shape of one record tool, and an
+        # aggregate result matches none of them -- it used to fall through to
+        # `str(output)`, putting a Python dict on screen. Rather than teach
+        # this function a new shape per tool, a tool may hand back the sentence
+        # it wants read. The structured fields stay in the payload for the
+        # trace; only the rendering changes.
+        summary = output.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary.strip()
         if output.get("found") is False:
             identifier = (
                 output.get("order_id") or output.get("customer_id") or "the requested record"

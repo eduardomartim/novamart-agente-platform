@@ -50,6 +50,70 @@ def _offered_tools(prompt: str) -> set[str]:
 #: conjugations such as "apague" and "apagou" are recognised. Matching only the
 #: infinitive let a destructive Portuguese request fall through to a harmless
 #: read, which then reported success for an action never performed.
+#: Aggregate intents, checked *before* the record tools. These questions are
+#: about the set rather than about a row, and matching them here is what stops
+#: "how many customers do we have?" reaching `get_customer`, which can only
+#: answer about one.
+#:
+#: Ordered most-specific-first for the same reason as the table below: "which
+#: customer placed the most orders" is a ranking, not an order listing.
+_AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "business_overview",
+        (
+            "needs attention", "need attention", "should i know", "should i be aware",
+            "any problem", "anything wrong", "manager", "deveria conhecer",
+            "precisa de atencao", "precisa de atenção", "algum problema",
+            "gestor", "resumo do negocio", "resumo do negócio",
+        ),
+    ),
+    (
+        "top_customers",
+        (
+            "top customer", "best customer", "biggest customer", "most orders",
+            "most purchases", "most valuable", "who buys", "buys the most",
+            "principais client", "melhores client", "maiores client",
+            "mais pedidos", "mais compras", "mais comprou",
+        ),
+    ),
+    (
+        "count_customers",
+        (
+            "how many customer", "number of customers", "customer count",
+            "customer base", "quantos client", "quantidade de client",
+            "total de client",
+        ),
+    ),
+    (
+        "revenue_total",
+        (
+            "total value", "total revenue", "total sales", "how much revenue",
+            "valor total", "faturamento", "receita total", "total em pedidos",
+        ),
+    ),
+    (
+        "open_tickets",
+        (
+            "urgent ticket", "open ticket", "unresolved ticket", "any ticket",
+            "support load", "tickets abertos", "ticket urgente",
+            "chamados abertos", "tickets em aberto",
+        ),
+    ),
+    (
+        "list_orders",
+        (
+            # Bare stems, not phrases. "delayed order" missed "which orders
+            # are delayed?" -- the words are in the other order -- and the
+            # question was declined even though `list_orders` answers it.
+            "delayed", "atrasad", "overdue", "em atraso",
+            "recent order", "latest order", "open orders", "orders are open",
+            "how many orders", "pedidos recentes", "pedidos em aberto",
+            "quantos pedidos", "ultimos pedidos", "últimos pedidos",
+        ),
+    ),
+)
+
+
 _ACTION_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "delete_record",
@@ -135,6 +199,64 @@ class StubProvider:
     # ------------------------------------------------------------------ routing
 
     @staticmethod
+    def _servable(request: str) -> bool:
+        """Could any registered tool actually answer this request?
+
+        Asked before routing, so a question nothing can serve is declined
+        instead of being sent to the researcher to produce something. The three
+        ways a request is answerable:
+
+        * it matches an aggregate intent -- those tools need no identifier;
+        * it carries an identifier, so a record lookup applies;
+        * it names a person, which `find_customer` resolves;
+        * or it is a knowledge-base question, which `search` always accepts.
+        """
+        lowered = request.lower()
+        if any(
+            keyword in lowered
+            for _tool, keywords in _AGGREGATE_KEYWORDS
+            for keyword in keywords
+        ):
+            return True
+        if (
+            _ORDER_ID.search(request)
+            or _CUSTOMER_ID.search(request)
+            or _TICKET_ID.search(request)
+        ):
+            return True
+        name = _person_name(request)
+        if name is not None:
+            # Two capitalised words read as somebody's full name, and a name
+            # lookup is the obvious tool. One word could be anything -- a city,
+            # a product, a country -- so "what is the weather in Tokyo?" used to
+            # become a search for a customer named Tokyo and report success on
+            # finding none. A single name needs either a domain word beside it,
+            # or to be the entire request, which is how a visitor types a name.
+            if " " in name:
+                return True
+            if request.strip().rstrip("?.!").strip() == name:
+                return True
+            return any(
+                word in lowered
+                for word in (
+                    "customer", "client", "cliente", "order", "pedido",
+                    "ticket", "chamado", "about", "sobre", "conta", "account",
+                )
+            )
+        # A documentation question. `search` takes free text, so it can always
+        # be attempted -- and when the corpus holds nothing, the answer node
+        # says so rather than inventing coverage.
+        return any(
+            word in lowered
+            for word in (
+                "policy", "policies", "how do i", "how long", "process",
+                "refund", "return", "shipping", "warranty", "politica",
+                "política", "prazo", "devoluc", "devoluç", "garantia",
+                "como funciona",
+            )
+        )
+
+    @staticmethod
     def _choose_route(prompt: str) -> str:
         """Classify intent.
 
@@ -174,7 +296,11 @@ class StubProvider:
         if has_write and not is_question:
             return "executor"
         if is_question or any(word in lowered for word in lookup_words):
-            return "researcher"
+            # Only if something can actually answer it. Routing an unanswerable
+            # question to the researcher is what produced a confident answer to
+            # a question nobody could serve; `direct_response` reaches the
+            # orchestrator's honest refusal instead.
+            return "researcher" if StubProvider._servable(prompt) else "direct_response"
         return "direct_response"
 
     @staticmethod
@@ -196,6 +322,17 @@ class StubProvider:
         offered = _offered_tools(prompt)
 
         matched: str | None = None
+
+        # Aggregate intents first. A question about the whole set must never be
+        # served by a tool that reads one row: that is how "how many customers
+        # do we have?" used to come back as a sentence about one customer.
+        for tool, keywords in _AGGREGATE_KEYWORDS:
+            if any(keyword in lowered for keyword in keywords):
+                matched = tool
+                break
+        if matched is not None and (not offered or matched in offered):
+            return matched, StubProvider._arguments_for(matched, request)
+        matched = None
 
         # Plural "orders" alongside a customer reference is a history lookup,
         # not a single-order lookup. Without this, "which orders does customer
@@ -235,15 +372,51 @@ class StubProvider:
         return fallback, StubProvider._arguments_for(fallback, request)
 
     @staticmethod
+    def _identifier(pattern: re.Pattern[str], text: str) -> str | None:
+        """The identifier the request actually carries, or nothing.
+
+        There used to be a default here -- `ORD-1001`, `CUS-2001`, `TKT-4001`.
+        It meant a question with no identifier still produced a lookup, so
+        "which orders are delayed?" was answered with a confident sentence
+        about one arbitrary order. A tool that needs an identifier the request
+        never gave is not a tool that can answer it.
+        """
+        match = pattern.search(text)
+        return match.group(1) if match else None
+
+    @staticmethod
     def _arguments_for(tool: str, prompt: str) -> dict[str, Any]:
+        if tool == "list_orders":
+            lowered = prompt.lower()
+            if any(
+                word in lowered
+                for word in ("delayed", "late", "overdue", "open", "atrasad", "aberto")
+            ):
+                return {"status": "open"}
+            if "cancel" in lowered:
+                return {"status": "cancelled"}
+            return {}
+        if tool in ("count_customers", "revenue_total", "open_tickets",
+                    "business_overview"):
+            return {}
+        if tool == "top_customers":
+            lowered = prompt.lower()
+            by_orders = any(
+                word in lowered
+                for word in ("most orders", "mais pedidos", "order count")
+            )
+            return {"by": "orders"} if by_orders else {"by": "revenue"}
         if tool == "get_order":
-            return {"order_id": f"ORD-{_first_group(_ORDER_ID, prompt, '1001')}"}
+            found = StubProvider._identifier(_ORDER_ID, prompt)
+            return {"order_id": f"ORD-{found}"} if found else {}
         if tool == "find_customer":
             return {"name": _person_name(prompt) or prompt[:80]}
         if tool in ("get_customer", "list_customer_orders"):
-            return {"customer_id": f"CUS-{_first_group(_CUSTOMER_ID, prompt, '2001')}"}
+            found = StubProvider._identifier(_CUSTOMER_ID, prompt)
+            return {"customer_id": f"CUS-{found}"} if found else {}
         if tool == "get_ticket":
-            return {"ticket_id": f"TKT-{_first_group(_TICKET_ID, prompt, '4001')}"}
+            found = StubProvider._identifier(_TICKET_ID, prompt)
+            return {"ticket_id": f"TKT-{found}"} if found else {}
         if tool == "update_record":
             return {
                 "record_id": f"ORD-{_first_group(_ORDER_ID, prompt, '1001')}",

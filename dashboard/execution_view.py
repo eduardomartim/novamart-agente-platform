@@ -90,25 +90,25 @@ class ExecutionView:
 #: Events worth showing a visitor, in plain language. Anything absent from this
 #: map is omitted rather than guessed at -- a step nobody can explain is noise.
 _STEP_LABELS: dict[str, str] = {
-    "request_started": "Request received",
-    "input_flagged": "Input flagged as injection-shaped",
-    "input_sensitive": "Input contains sensitive data",
-    "input_rejected": "Input rejected",
-    "rate_limited": "Rate limit applied",
-    "route_selected": "Router classified the request",
-    "agent_started": "Agent started",
-    "action_proposed": "Action proposed",
-    "policy_decision": "Policy engine decided",
-    "confirmation_requested": "Waiting for human approval",
-    "confirmation_resolved": "Human decision recorded",
-    "tool_call": "Tool executed",
-    "validation": "Result validated",
-    "resource_limit": "Resource ceiling reached",
-    "circuit_open": "Provider circuit open",
-    "prompt_redacted": "Credentials stripped before egress",
-    "output_redacted": "Response redacted",
-    "request_completed": "Response returned",
-    "request_failed": "Request failed",
+    "request_started": "Requisição recebida",
+    "input_flagged": "Entrada com forma de injeção",
+    "input_sensitive": "Entrada contém dado sensível",
+    "input_rejected": "Entrada rejeitada",
+    "rate_limited": "Limite de taxa aplicado",
+    "route_selected": "Roteador classificou a requisição",
+    "agent_started": "Agente iniciou",
+    "action_proposed": "Ação proposta",
+    "policy_decision": "Motor de políticas decidiu",
+    "confirmation_requested": "Aguardando aprovação humana",
+    "confirmation_resolved": "Decisão humana registrada",
+    "tool_call": "Ferramenta executada",
+    "validation": "Resultado validado",
+    "resource_limit": "Teto de recursos atingido",
+    "circuit_open": "Circuito do provedor aberto",
+    "prompt_redacted": "Credenciais removidas antes da saída",
+    "output_redacted": "Resposta redigida",
+    "request_completed": "Resposta devolvida",
+    "request_failed": "Requisição falhou",
 }
 
 #: Deliberately omitted from the timeline: a model call is an implementation
@@ -286,7 +286,7 @@ def _steps(events: list[dict[str, Any]]) -> tuple[Step, ...]:
         agent = event.get("agent")
         tool = event.get("tool")
         if kind == "agent_started" and agent:
-            label = f"{agent.capitalize()} started"
+            label = f"{agent.capitalize()} iniciou"
 
         bits = []
         if tool:

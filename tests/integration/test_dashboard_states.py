@@ -31,19 +31,12 @@ from agent_platform.platform import AgentPlatform
 APP = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
 
 PAGES = [
-    "Start here",
-    "Company",
-    "Data explorer",
-    "Agents",
-    "Try a request",
-    "Demo scenarios",
-    "Overview",
-    "Agent flow",
-    "Security",
-    "Evaluation",
-    "Cost",
-    "Reliability",
-    "Drift",
+    "Visão geral",
+    "Empresa",
+    "Orquestrador",
+    "Segurança",
+    "Arquitetura",
+    "Observabilidade",
 ]
 
 #: Substrings that must never appear in a rendered page.
@@ -190,7 +183,7 @@ def test_pages_disclose_nothing_over_failure_states(page, states_db):
 @pytest.mark.slow
 def test_provider_failure_is_explained_not_dumped(states_db):
     """A failed request must read as an explanation, not an exception."""
-    text = _rendered_text(_render(states_db, "Reliability"))
+    text = _rendered_text(_render(states_db, "Observabilidade"))
     assert "someone" not in text, "the provider error disclosed a local username"
     assert "Traceback" not in text
 
@@ -198,7 +191,7 @@ def test_provider_failure_is_explained_not_dumped(states_db):
 @pytest.mark.slow
 def test_security_page_shows_the_denial_that_happened(states_db):
     """A real denial must be visible; the page is evidence, not decoration."""
-    app = _render(states_db, "Security")
+    app = _render(states_db, "Segurança")
     text = _rendered_text(app)
     assert text.strip(), "the security page rendered nothing despite real denials"
     assert not app.exception
@@ -207,7 +200,7 @@ def test_security_page_shows_the_denial_that_happened(states_db):
 @pytest.mark.slow
 def test_pending_confirmation_does_not_render_as_an_error(states_db):
     """A suspended request is a normal state, not a failure."""
-    app = _render(states_db, "Overview")
+    app = _render(states_db, "Observabilidade")
     assert not app.exception
     errors = " ".join(e.value for e in app.error)
     assert "awaiting_confirmation" not in errors

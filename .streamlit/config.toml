@@ -24,3 +24,18 @@ gatherUsageStats = false
 [server]
 # The dashboard reads a local SQLite database and needs no uploads.
 maxUploadSize = 1
+
+# Visual identity. Colours only -- no behaviour, and nothing above this line
+# changes: the hardening settings are security controls and stay exactly as
+# they were.
+#
+# Dark, near-black graphite with a single blue accent. Green, red and amber are
+# reserved for meaning (ALLOW / DENY / warning) and are never used decoratively,
+# so a colour in this interface always says something.
+[theme]
+base = "dark"
+primaryColor = "#2F81F7"
+backgroundColor = "#0B0E14"
+secondaryBackgroundColor = "#141A23"
+textColor = "#E6EDF3"
+font = "sans serif"

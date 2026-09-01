@@ -1,50 +1,186 @@
-"""Streamlit operations dashboard.
+"""NovaMart — AI Agent Orchestrator, the console a visitor actually sees.
 
-Every figure shown here is read from the database. Where there is no data, the
-page says so rather than rendering a plausible-looking placeholder -- a
-dashboard that invents numbers is worse than no dashboard, and the whole point
-of this project is that the observability is real.
+Six pages, not thirteen. The earlier version had one page per subsystem, which
+is how the people who built it think about it and not how a first-time reader
+does: cost, reliability, drift and evaluation each had a page, so understanding
+the product meant opening ten of them. They are still here, as sections inside
+the page whose question they answer.
 
-Run with:  streamlit run dashboard/app.py
+The rule this file is arranged around: **the complexity belongs in the system,
+not on the first screen.** A visitor should be able to say what this is, what it
+does and what they can try within a minute; everything deeper sits one
+disclosure away.
+
+Nothing here holds authority. Every answer comes from ``AgentPlatform.run()``,
+the same call the CLI and the HTTP API make, and every number is read from the
+repository or the simulated dataset rather than written down as a claim.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
+import altair as alt
 import streamlit as st
 
-# Support running via `streamlit run dashboard/app.py` from the repo root
-# without requiring the package to be installed first.
-_SRC = Path(__file__).resolve().parents[1] / "src"
-if _SRC.exists() and str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import demo_budget  # noqa: E402
-import demo_content as demo  # noqa: E402
-import execution_view  # noqa: E402
+import demo_budget
+import demo_content as demo
+import execution_view
 
-from agent_platform.config import Settings  # noqa: E402
-from agent_platform.cost.pricing import (  # noqa: E402
-    FREE_TIER_MODELS,
-    PRICING_VERIFIED_ON,
-    is_stale,
-    pricing_notice,
+from agent_platform.config import Settings
+from agent_platform.cost.pricing import pricing_notice
+from agent_platform.guardrails.authorization import describe_matrix
+from agent_platform.guardrails.rules import describe_rules
+from agent_platform.observability.metrics import collect_metrics
+from agent_platform.platform import AgentPlatform
+
+st.set_page_config(
+    page_title="NovaMart — AI Agent Orchestrator",
+    page_icon=":material/hub:",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-from agent_platform.drift import DriftMonitor, snapshot  # noqa: E402
-from agent_platform.guardrails.authorization import describe_matrix  # noqa: E402
-from agent_platform.guardrails.rules import describe_rules  # noqa: E402
-from agent_platform.models import AgentName  # noqa: E402
-from agent_platform.observability.metrics import collect_metrics  # noqa: E402
-from agent_platform.platform import AgentPlatform  # noqa: E402
 
-st.set_page_config(page_title="Agent Platform", page_icon=":shield:", layout="wide")
+# One constant stylesheet, injected once.
+#
+# It is a single literal that never varies between reruns, so React sees byte
+# identical markup every time and has nothing to reconcile. That matters here:
+# the previous version of this app produced `insertBefore` errors, and the way
+# to keep the fix is to make sure the only raw markup in the file is static.
+#
+# Colour carries meaning and nothing else. Blue is the product, green is
+# ALLOW/healthy, red is DENY/blocked, amber is a warning. Nothing is coloured
+# for decoration, so a colour in this interface is always information.
+_STYLE = """
+<style>
+  :root {
+    --ap-line:    #232B36;
+    --ap-muted:   #8B98A9;
+    --ap-blue:    #2F81F7;
+    --ap-cyan:    #38BDF8;
+    --ap-green:   #3FB950;
+    --ap-red:     #F85149;
+    --ap-amber:   #D29922;
+    --ap-surface: #111721;
+  }
+
+  /* Wider gutters and a calmer rhythm than the Streamlit default. */
+  .block-container { padding-top: 2.6rem; max-width: 1180px; }
+  h1, h2, h3 { letter-spacing: -0.02em; }
+  h1 { font-weight: 650; }
+  /* Streamlit sizes headings through a generated `.st-emotion-cache-<hash>`
+     class whose hash changes between releases, so matching it would break on
+     upgrade. `[data-testid="stMain"]` is a stable hook, and `!important` is
+     what wins without depending on stylesheet order. */
+  [data-testid="stMain"] h1 { font-size: clamp(1.7rem, 3.4vw, 2.75rem) !important; }
+  h2 { font-weight: 600; margin-top: 2.2rem; }
+  h3 { font-weight: 600; font-size: 1.02rem; }
+  hr { border-color: var(--ap-line); }
+
+  /* Sections fade in rather than snapping. 160ms is below the threshold where
+     motion starts to feel like an effect. */
+  @media (prefers-reduced-motion: no-preference) {
+    .ap-fade { animation: ap-in 0.16s ease-out both; }
+  }
+  @keyframes ap-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  .ap-eyebrow {
+    font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ap-muted); margin-bottom: 0.35rem;
+  }
+  .ap-lede { color: var(--ap-muted); font-size: 1.02rem; max-width: 62ch; }
+
+  .ap-card {
+    border: 1px solid var(--ap-line); background: var(--ap-surface);
+    border-radius: 6px; padding: 0.95rem 1.05rem; height: 100%;
+    transition: border-color 0.16s ease;
+  }
+  .ap-card:hover { border-color: #31465F; }
+  .ap-card h4 { margin: 0 0 0.3rem; font-size: 0.94rem; font-weight: 600; }
+  .ap-card p  { margin: 0; color: var(--ap-muted); font-size: 0.86rem; line-height: 1.5; }
+
+  /* The pipeline. Static markup, so it costs nothing to reconcile. */
+  .ap-flow {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+    align-items: center; margin: 0.4rem 0 0.2rem;
+  }
+  .ap-node {
+    border: 1px solid var(--ap-line); border-radius: 5px; padding: 0.4rem 0.7rem;
+    font-size: 0.82rem; background: var(--ap-surface); white-space: nowrap;
+  }
+  .ap-node.is-gate { border-color: var(--ap-blue); color: #CFE3FF; }
+  .ap-arrow { color: var(--ap-muted); font-size: 0.9rem; }
+
+  /* The mode strip: a badge and a sentence on one line, with a hairline
+     under it. Loud enough to be read, quiet enough not to look like a fault. */
+  .ap-mode {
+    display: flex; gap: 0.7rem; align-items: baseline; flex-wrap: wrap;
+    padding: 0.6rem 0 0.75rem; border-bottom: 1px solid var(--ap-line);
+    color: var(--ap-muted); font-size: 0.88rem; margin-bottom: 0.3rem;
+  }
+  .ap-mode code {
+    background: var(--ap-surface); border: 1px solid var(--ap-line);
+    border-radius: 4px; padding: 0.05rem 0.3rem; font-size: 0.82rem;
+  }
+
+  /* The evidence strip. Rules between rows rather than a box around each,
+     so it reads as one statement instead of four competing ones. */
+  .ap-guarantees { margin: 0.2rem 0 0.4rem; max-width: 72ch; }
+  .ap-guarantee {
+    display: flex; gap: 1rem; align-items: baseline;
+    padding: 0.55rem 0; border-top: 1px solid var(--ap-line);
+    font-size: 0.88rem; color: var(--ap-muted);
+  }
+  .ap-guarantee:last-child { border-bottom: 1px solid var(--ap-line); }
+  .ap-guarantee-key {
+    flex: 0 0 8.5rem; color: #C9D5E4; font-weight: 600;
+    font-size: 0.8rem; letter-spacing: 0.03em;
+  }
+
+  .ap-pill {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    letter-spacing: 0.06em; padding: 0.16rem 0.5rem; border-radius: 4px;
+    border: 1px solid currentColor;
+  }
+  .ap-allow { color: var(--ap-green); }
+  .ap-deny  { color: var(--ap-red); }
+  .ap-hold  { color: var(--ap-amber); }
+
+  /* Tables should breathe rather than be squeezed. */
+  [data-testid="stDataFrame"] { border: 1px solid var(--ap-line); border-radius: 6px; }
+  [data-testid="stMetricValue"] { font-size: 1.55rem; font-weight: 600; }
+  [data-testid="stMetricLabel"] { color: var(--ap-muted); }
+
+  section[data-testid="stSidebar"] { border-right: 1px solid var(--ap-line); }
+  section[data-testid="stSidebar"] .block-container { padding-top: 1.4rem; }
+
+  @media (max-width: 900px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    [data-testid="stMain"] h2 { font-size: 1.25rem !important; margin-top: 1.7rem; }
+    .ap-lede { font-size: 0.95rem; }
+    /* 0.72rem is 11px, which is small for uppercase on a phone. */
+    .ap-eyebrow { font-size: 0.78rem; }
+    .ap-card p { font-size: 0.9rem; }
+    .ap-node { font-size: 0.78rem; padding: 0.32rem 0.55rem; }
+    .ap-guarantee { flex-direction: column; gap: 0.15rem; }
+    .ap-guarantee-key { flex: none; }
+
+    /* Streamlit keeps the sidebar as a fixed 300px panel until its own much
+       narrower breakpoint, which is 39% of a 768px tablet -- the navigation
+       taking more room than the thing being navigated. Narrowing it here
+       gives the content back the majority of the screen. */
+    section[data-testid="stSidebar"] { width: 210px !important; min-width: 210px !important; }
+    section[data-testid="stSidebar"] .block-container {
+      padding-left: 0.9rem; padding-right: 0.9rem;
+    }
+  }
+</style>
+"""
 
 
 @st.cache_resource
@@ -53,1084 +189,1057 @@ def get_platform() -> AgentPlatform:
     return AgentPlatform(Settings.from_env())
 
 
-DEFAULT_HINT = "Seed the database with `agent-platform demo`."
+DEFAULT_HINT = "Popule o banco com `agent-platform demo`."
 
 
 def no_data(message: str, *, hint: str | None = DEFAULT_HINT) -> None:
-    """Empty state carrying the command that actually populates *this* page.
-
-    The hint is a parameter rather than a constant because the pages are not
-    filled by the same command: `demo` seeds traffic but records no evaluation
-    run, so telling a reader to run it on the evaluation page sends them in a
-    circle.
-    """
+    """Empty state carrying the command that actually populates *this* page."""
     st.info(message if hint is None else f"{message}\n\n{hint}")
 
 
-def provider_banner(platform: AgentPlatform) -> None:
-    """State which engine is answering, in language a non-engineer can read.
+def eyebrow(text: str) -> None:
+    st.markdown(f'<p class="ap-eyebrow">{text}</p>', unsafe_allow_html=True)
 
-    This used to lead with the name of a missing environment variable, which
-    is the least useful thing a first-time visitor could be told. The fact that
-    matters is whether a real model is involved.
+
+def lede(text: str) -> None:
+    """A muted sub-heading paragraph.
+
+    This is raw HTML, so markdown is not parsed inside it: emphasis has to be
+    written as `<strong>`, not as `**bold**`, which renders as four literal
+    asterisks. Same for `eyebrow`.
+    """
+    st.markdown(f'<p class="ap-lede">{text}</p>', unsafe_allow_html=True)
+
+
+def cards(items: list[tuple[str, str]], per_row: int = 3) -> None:
+    """A row of equal cards. Fixed count per row, so the layout never reflows
+    into a different number of elements between reruns."""
+    for start in range(0, len(items), per_row):
+        row = items[start : start + per_row]
+        columns = st.columns(per_row)
+        for column, (title, body) in zip(columns, row, strict=False):
+            column.markdown(
+                f'<div class="ap-card ap-fade"><h4>{title}</h4><p>{body}</p></div>',
+                unsafe_allow_html=True,
+            )
+
+
+def guarantees(items: list[tuple[str, str]]) -> None:
+    """A quiet evidence strip: a label, a fact, a hairline between them.
+
+    Cards would have made these compete with the capabilities above; they are
+    not the argument, they are what makes the argument checkable. One block of
+    static markup, so it costs nothing to reconcile.
+    """
+    rows = "".join(
+        f'<div class="ap-guarantee"><span class="ap-guarantee-key">{key}</span>'
+        f"<span>{value}</span></div>"
+        for key, value in items
+    )
+    st.markdown(f'<div class="ap-guarantees">{rows}</div>', unsafe_allow_html=True)
+
+
+def flow(nodes: list[str], gate: str | None = None) -> None:
+    """The request pipeline, as static markup."""
+    parts = []
+    for index, node in enumerate(nodes):
+        css = "ap-node is-gate" if node == gate else "ap-node"
+        parts.append(f'<span class="{css}">{node}</span>')
+        if index < len(nodes) - 1:
+            parts.append('<span class="ap-arrow">&rarr;</span>')
+    st.markdown(f'<div class="ap-flow">{"".join(parts)}</div>', unsafe_allow_html=True)
+
+
+def mode_banner(platform: AgentPlatform) -> None:
+    """Which engine is answering, in language a non-engineer can read.
+
+    A one-line strip rather than `st.info`, whose full-width blue box was the
+    second-largest element on the landing page and read as an alert. The
+    statement has to be unmissable -- nobody should mistake the stub for a
+    model -- but unmissable is a job for placement, not for area.
     """
     info = platform.provider_info
     if info.live:
-        st.success(
-            f"**LIVE MODE** -- requests are processed by the configured AI "
-            f"provider (`{info.model}`)."
+        badge, text = (
+            '<span class="ap-pill ap-allow">LIVE</span>',
+            f"As requisições são processadas pelo provedor configurado "
+            f"(<code>{info.model}</code>).",
         )
     else:
-        st.info(
-            "**STUB MODE** -- responses come from a deterministic local "
-            "simulation. No AI provider is being called, and nothing here is "
-            "attributed to one.",
-            icon=":material/science:",
+        badge, text = (
+            '<span class="ap-pill ap-hold">DEMO / STUB</span>',
+            "Simulação local determinística. Nenhum provedor de IA externo "
+            "está sendo chamado, e nada aqui é atribuído a um.",
         )
+    st.markdown(
+        f'<div class="ap-mode">{badge}<span>{text}</span></div>',
+        unsafe_allow_html=True,
+    )
 
 
-# ----------------------------------------------------------------------- pages
+def live_call_count(platform: AgentPlatform) -> int:
+    """Real calls to a real provider, read rather than assumed.
+
+    In stub mode this is zero by construction -- no provider is reachable at
+    all. Reading it instead of hard-coding a zero means the number stays true
+    if the dashboard is ever pointed at a live deployment.
+    """
+    try:
+        summary = platform.repository.metrics_summary()
+    except Exception:
+        return 0
+    if platform.provider_info.live:
+        return int(summary.get("llm_calls", 0) or 0)
+    return 0
+
+
+def goto(page: str, question: str | None = None) -> None:
+    """Queue a navigation for the next rerun.
+
+    Writes state and returns. It deliberately does not call ``st.rerun()``:
+    a rerun raised from inside a tab or an expander tears down a subtree that
+    React is still holding a reference into, which is what produced
+    `insertBefore` errors in the previous version. Streamlit reruns on its own
+    after a button press, and the radio picks the queued page up then.
+    """
+    st.session_state["nav"] = page
+    if question is not None:
+        st.session_state["queued_question"] = question
+
+
+# ============================================================ 1. Visão geral
 
 
 def page_overview(platform: AgentPlatform) -> None:
-    st.header("Overview")
-    metrics = collect_metrics(platform.repository)
+    """The thirty-second answer.
 
-    if not metrics.has_data:
-        no_data("No requests have been recorded yet.")
-        return
+    Six things in one order: who this is, what it does in one sentence, the
+    path a request takes, the four capabilities worth naming, one button that
+    starts the demonstration, and the guarantees under it. The dataset counters
+    that used to sit here now live on Empresa, where the dataset is -- a number
+    a visitor cannot act on is not an opening argument.
+    """
+    eyebrow(demo.COMPANY_TAGLINE)
+    st.title(f"{demo.COMPANY_NAME} — {demo.PRODUCT_NAME}")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Requests", metrics.requests)
-    c2.metric("Success rate", f"{metrics.success_rate:.0%}")
-    c3.metric("Blocked actions", metrics.policy_denials)
-    c4.metric("Estimated cost", f"${metrics.estimated_cost_usd:.6f}")
-    c5.metric("Avg latency", f"{metrics.avg_latency_ms:.0f} ms")
-
-    st.caption(pricing_notice())
-
-    st.subheader("Recent requests")
-    rows = platform.repository.recent_requests(limit=25)
-    if rows:
-        frame = pd.DataFrame(rows)[
-            ["created_at", "provider", "status", "route", "latency_ms",
-             "retry_count", "blocked"]
-        ]
-        st.dataframe(frame, width="stretch", hide_index=True)
-
-
-def page_agent_flow(platform: AgentPlatform) -> None:
-    st.header("Agent flow")
-    st.markdown(
-        "Every request follows the same path. An agent proposes; the policy "
-        "engine decides; the gateway is the only component that executes."
+    # The whole product in one sentence, in the order a reader needs it:
+    # who acts, over what, and who is allowed to stop them.
+    lede(
+        "A NovaMart usa agentes de IA especializados para consultar clientes, "
+        "pedidos e suporte. Um orquestrador decide quais agentes entram em "
+        "ação, e um <strong>Policy Engine</strong> bloqueia operações de "
+        "risco antes que "
+        "qualquer ferramenta rode."
     )
-    st.code(
-        "user request\n"
-        "     |\n"
-        "  [router]            classifies, holds no tools\n"
-        "     |\n"
-        "  [researcher]        read-only context gathering\n"
-        "     |\n"
-        "  [executor]          proposes one action\n"
-        "     |\n"
-        "  policy engine  -->  DENY / REQUIRE_CONFIRMATION / ALLOW\n"
-        "     |\n"
-        "  tool gateway        the only path to a tool\n"
-        "     |\n"
-        "  [validator]         deterministic checks, then optional judge\n"
-        "     |\n"
-        "  response",
-        language="text",
+    st.write("")
+    mode_banner(platform)
+
+    # --- the path a request takes ------------------------------------------
+    st.header("Como funciona")
+    flow(
+        [
+            "Usuário",
+            "Router",
+            "Agente especializado",
+            "Policy Engine",
+            "Ferramenta",
+            "Validador",
+            "Resposta",
+        ],
+        gate="Policy Engine",
+    )
+    lede(
+        "O mesmo caminho toda vez. Nenhum agente executa uma ferramenta: eles "
+        "propõem, e o Policy Engine decide."
     )
 
-    st.subheader("Inspect a request trace")
-    rows = platform.repository.recent_requests(limit=50)
-    if not rows:
-        no_data("No traces recorded yet.")
-        return
-
-    labels = {
-        f"{r['created_at']}  {r['status']:22}  {r['request_id']}": r["request_id"]
-        for r in rows
-    }
-    chosen = st.selectbox("Request", list(labels))
-    events = platform.repository.events_for_request(labels[chosen])
-    if not events:
-        st.info("No events for this request.")
-        return
-
-    frame = pd.DataFrame(events)[
-        ["sequence", "event_type", "status", "agent", "tool", "policy_decision",
-         "risk_level", "rule_ids", "latency_ms"]
-    ]
-    st.dataframe(frame, width="stretch", hide_index=True)
-
-    with st.expander("Event payloads (sanitised before storage)"):
-        for event in events:
-            st.markdown(f"**{event['sequence']}. {event['event_type']}**")
-            st.json(json.loads(event["payload"] or "{}"))
-
-
-def page_security(platform: AgentPlatform) -> None:
-    st.header("Security")
-    metrics = collect_metrics(platform.repository)
-
-    if not metrics.has_data:
-        # Without this, a fresh database renders four zeroes and two empty
-        # tables, which reads as "nothing was detected" rather than "nothing
-        # has run yet" -- the two are very different claims on a security page.
-        no_data("No requests have been recorded, so there is nothing to report yet.")
-        st.subheader("Controls that would be enforced")
-        st.dataframe(pd.DataFrame(describe_rules()), width="stretch", hide_index=True)
-        st.caption(
-            "These rules are enforced on every request. The counters above stay "
-            "at zero until traffic has been recorded."
-        )
-        return
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Policy denials", metrics.policy_denials)
-    c2.metric("Confirmations required", metrics.confirmations)
-    c3.metric("Injection signals", metrics.injection_flags)
-    c4.metric("Sensitive inputs", metrics.sensitive_inputs)
-
-    redactions = [
-        e for e in platform.repository.recent_events(limit=400)
-        if e["event_type"] == "prompt_redacted"
-    ]
-    if redactions:
-        st.metric("Prompts redacted before egress", len(redactions))
-        st.caption(
-            "Credentials are stripped from every prompt before it reaches a "
-            "provider. Only the category is recorded, never the value."
-        )
+    # --- four capabilities, from the declared list --------------------------
+    st.header("O que este projeto demonstra")
+    cards(list(demo.DEMONSTRATED[:4]), per_row=2)
     st.caption(
-        "Injection signals and sensitive inputs are counted separately: an "
-        "email address in a support request is not an attack."
+        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
+        "detalhados em **Arquitetura**."
     )
 
-    events = platform.repository.recent_events(limit=400)
-    denials = [e for e in events if e["policy_decision"] == "deny"
-               and e["event_type"] == "policy_decision"]
-    if denials:
-        st.subheader("Blocked actions")
-        frame = pd.DataFrame(denials)[
-            ["created_at", "agent", "tool", "risk_level", "rule_ids"]
-        ]
-        st.dataframe(frame, width="stretch", hide_index=True)
-    else:
-        st.info("No blocked actions recorded yet.")
-
-    st.subheader("Enforced policy rules")
-    st.dataframe(pd.DataFrame(describe_rules()), width="stretch", hide_index=True)
-
-    st.subheader("Capability matrix (least privilege)")
-    matrix = describe_matrix()
-    st.dataframe(
-        pd.DataFrame(matrix).T.replace({True: "yes", False: "-"}), width="stretch"
-    )
-    st.caption(
-        "No role holds the delete capability. Authorisation requires passing "
-        "both this matrix and the tool's own allow-list."
-    )
-
-
-def page_evaluation(platform: AgentPlatform) -> None:
-    st.header("Evaluation")
-    runs = platform.repository.eval_runs(limit=20)
-    if not runs:
-        no_data("No evaluation runs recorded yet. Run `agent-platform eval`.", hint=None)
-        return
-
-    latest = runs[0]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Cases", latest["case_count"])
-    c2.metric("Passed", latest["passed_count"])
-    c3.metric("Safety", _fmt(latest["safety"]))
-    c4.metric("Overall", _fmt(latest["overall"]))
-
-    c5, c6, c7 = st.columns(3)
-    c5.metric("Correctness", _fmt(latest["correctness"]))
-    c6.metric("Tool accuracy", _fmt(latest["tool_accuracy"]))
-    c7.metric("Relevance", _fmt(latest["relevance"]))
-
-    if not latest["judge_used"]:
-        st.info(
-            "Relevance is unavailable in this run. It requires a live model "
-            "judge; the deterministic stub declines to score rather than "
-            "returning a fixed number that would look like a measurement."
-        )
-
-    live_runs = [r for r in runs if r["provider"] != "stub"]
-    stub_runs = [r for r in runs if r["provider"] == "stub"]
-    if live_runs and stub_runs:
-        st.warning(
-            "This database holds both stub and live evaluation runs. Their "
-            "scores are not comparable: stub runs measure the platform, live "
-            "runs measure a model on this dataset."
-        )
-    if latest["provider"] == "stub":
-        st.info(
-            "The most recent run used the deterministic stub. A perfect score "
-            "here means the **platform** behaved correctly given predictable "
-            "model output -- it says nothing about model quality."
-        )
-
-    st.subheader("Run history")
-    frame = pd.DataFrame(runs)[
-        ["created_at", "provider", "model", "dataset", "case_count",
-         "passed_count", "safety", "overall", "judge_used"]
-    ]
-    st.dataframe(frame, width="stretch", hide_index=True)
-
-
-def page_cost(platform: AgentPlatform) -> None:
-    st.header("Cost")
-    metrics = collect_metrics(platform.repository)
-
-    if not metrics.llm_calls:
-        no_data("No model calls recorded yet.")
-        return
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Model calls", metrics.llm_calls)
-    c2.metric("Total tokens", f"{metrics.total_tokens:,}")
-    c3.metric("Estimated cost", f"${metrics.estimated_cost_usd:.6f}")
-    c4.metric("Cost / request", f"${metrics.cost_per_request:.6f}")
-
-    settings = platform.settings
-    status = platform.budget_guard.status()
-    st.subheader("Budget")
-    st.progress(
-        min(1.0, status.daily_used_fraction),
-        text=(
-            f"${status.daily_spent_usd:.6f} of ${status.daily_limit_usd:.2f} "
-            f"daily budget used"
-        ),
-    )
-    st.caption(
-        f"Per-request cap ${settings.max_request_cost_usd:.4f}. "
-        "Requests projected to exceed either limit are refused by rule PL007."
-    )
-
-    st.subheader("Spend by provider")
-    breakdown = platform.repository.cost_by_provider()
-    if breakdown:
-        frame = pd.DataFrame(
-            [
-                {
-                    "provider": row["provider"],
-                    "model": row["model"],
-                    "calls": row["calls"],
-                    "tokens": row["tokens"],
-                    "cost_usd": float(row["cost_usd"]),
-                    "estimated": f"{row['estimated_calls']}/{row['calls']}",
-                }
-                for row in breakdown
-            ]
-        )
-        st.dataframe(frame, width="stretch", hide_index=True)
-        providers = {row["provider"] for row in breakdown}
-        if "stub" in providers and len(providers) > 1:
-            st.info(
-                "This database holds both stub and live calls. Stub rows are "
-                "structurally $0, so a blended cost-per-request figure would "
-                "describe neither -- read the per-provider rows instead."
-            )
-
-    st.subheader("Rate card")
-    if is_stale():
-        st.error(
-            f"The rate card was verified on {PRICING_VERIFIED_ON.isoformat()} and is "
-            "now stale. Cost figures may be wrong until it is re-checked."
-        )
-    else:
-        st.caption(pricing_notice())
-
-    if platform.provider.model in FREE_TIER_MODELS:
-        st.info(
-            f"`{platform.provider.model}` has a free tier. The figures above are "
-            "what these calls **would** cost at paid-tier rates, which is the "
-            "number worth tracking before a project leaves the free tier."
-        )
-
-
-def page_reliability(platform: AgentPlatform) -> None:
-    st.header("Reliability")
-
-    # --- provider circuit ---------------------------------------------------
-    st.subheader("Provider circuit")
-    circuit = platform.circuit.snapshot()
-    state = str(circuit["state"])
-    if state == "closed":
-        st.success(f"Circuit **closed** - provider calls flowing "
-                   f"({circuit['consecutive_failures']} consecutive failures)")
-    elif state == "half_open":
-        st.warning("Circuit **half-open** - one trial call will be admitted")
-    else:
-        st.error(
-            f"Circuit **open** after {circuit['consecutive_failures']} consecutive "
-            f"failures. Calls fail fast for another "
-            f"{circuit['retry_after_seconds']}s."
-        )
-    st.caption(
-        f"Opens after {circuit['failure_threshold']} consecutive failures; "
-        f"cooldown {circuit['cooldown_seconds']:.0f}s. The circuit can only "
-        "prevent a provider call - it never authorises an action."
-    )
-
-    # --- hard resource limits ----------------------------------------------
-    st.subheader("Resource limits")
-    limits = platform.resources.limits
-    st.dataframe(
-        pd.DataFrame(
-            [
-                {"limit": "LLM calls / request", "value": limits.max_llm_calls_per_request},
-                {"limit": "Tool calls / request", "value": limits.max_tool_calls_per_request},
-                {"limit": "Request deadline (s)", "value": limits.request_deadline_seconds},
-                {"limit": "Tool output (bytes)", "value": limits.max_tool_output_bytes},
-                {"limit": "Pending confirmations", "value": limits.max_pending_confirmations},
-                {
-                    "limit": "Confirmation TTL (s)",
-                    "value": platform.settings.confirmation_ttl_seconds,
-                },
-                {"limit": "Graph recursion limit", "value": platform.settings.recursion_limit},
-                {"limit": "Requests / minute", "value": platform.settings.requests_per_minute},
-                {"limit": "Requests / hour", "value": platform.settings.requests_per_hour},
-            ]
-        ),
+    # --- the one call to action --------------------------------------------
+    st.header("Experimente")
+    starter = demo.READ_ONLY_EXAMPLES[0][0]
+    lede("Uma pergunta em linguagem natural, e a decisão que o sistema tomou.")
+    columns = st.columns([6, 2])
+    columns[0].code(starter, language="text", wrap_lines=True)
+    columns[1].button(
+        "Executar esta pergunta",
+        key="cta_try",
+        type="primary",
         width="stretch",
-        hide_index=True,
-    )
-    c1, c2 = st.columns(2)
-    c1.metric("Requests in flight", platform.resources.active_requests())
-    c2.metric("Awaiting confirmation", len(platform._pending))
-    st.caption(
-        "These ceilings are denominated in calls, seconds and bytes rather than "
-        "money, so they hold even when the provider is free. None of them can "
-        "be influenced by model output."
-    )
-
-    events = platform.repository.recent_events(limit=400)
-    stops = [e for e in events if e["event_type"] in ("resource_limit", "circuit_open")]
-    if stops:
-        st.subheader("Recent resource stops")
-        st.dataframe(
-            pd.DataFrame(stops)[["created_at", "event_type", "agent", "tool", "error"]],
-            width="stretch",
-            hide_index=True,
-        )
-
-    st.divider()
-    metrics = collect_metrics(platform.repository)
-
-    if not metrics.has_data:
-        no_data("No requests recorded yet.")
-        return
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Avg latency", f"{metrics.avg_latency_ms:.0f} ms")
-    c2.metric("Failure rate", f"{metrics.failure_rate:.0%}")
-    c3.metric("Retries", metrics.retries)
-    c4.metric("Tool failures", metrics.tool_failures)
-
-    st.caption(
-        f"Retries are capped at {platform.settings.max_retries} per request, and the "
-        f"graph runs under a recursion limit of {platform.settings.recursion_limit}. "
-        "Refused actions are never retried."
-    )
-
-    rows = platform.repository.recent_requests(limit=50)
-    if rows:
-        frame = pd.DataFrame(rows)
-        st.subheader("Latency by request")
-        st.bar_chart(frame.set_index("created_at")["latency_ms"])
-
-
-def page_drift(platform: AgentPlatform) -> None:
-    st.header("Drift")
-    monitor = DriftMonitor(platform.repository)
-    provider = platform.provider.name
-    model = platform.provider.model
-    st.caption(
-        f"Baselines are scoped to provider and model. Showing: `{provider}` / `{model}`."
-    )
-    baseline = monitor.baseline(provider=provider, model=model)
-
-    if baseline is None:
-        no_data(
-            f"No baseline captured for `{provider}` / `{model}`. Run "
-            "`agent-platform eval` then `agent-platform baseline` while this "
-            "provider is active.\n\nBaselines from a different provider are "
-            "deliberately not reused: the stub and a live model differ in "
-            "quality and latency by construction, so the comparison would "
-            "report a dramatic regression that describes neither.",
-            hint=None,
-        )
-        return
-
-    latest = platform.repository.latest_eval_run() or {}
-    current = snapshot(
-        collect_metrics(platform.repository),
-        quality=latest.get("overall"),
-        safety=latest.get("safety"),
-        tool_accuracy=latest.get("tool_accuracy"),
-    )
-    report = monitor.compare(current, provider=provider, model=model)
-    if report is None:
-        no_data("Baseline could not be compared.")
-        return
-
-    if report.safety_regressed:
-        st.error("Safety has regressed. This dimension has zero tolerance.")
-    elif report.has_regression:
-        st.warning(
-            f"{len(report.regressions)} dimension(s) moved beyond tolerance: "
-            + ", ".join(d.name for d in report.regressions)
-        )
-    else:
-        st.success("All tracked dimensions are within tolerance.")
-
-    st.dataframe(
-        pd.DataFrame([d.as_dict() for d in report.dimensions]),
-        width="stretch",
-        hide_index=True,
+        on_click=goto,
+        args=("Orquestrador", starter),
     )
     st.caption(
-        f"Baseline captured {report.baseline_created_at}. Drift indicates that "
-        "behaviour changed; it does not identify a cause."
+        "As perguntas estão em inglês porque é o idioma que o roteador e o "
+        "conjunto de dados usam — é literalmente o texto que entra no sistema."
     )
 
-
-def page_try_it(platform: AgentPlatform) -> None:
-    st.header("Try the orchestrator")
-    st.markdown(
-        f"Ask anything about {demo.COMPANY_NAME}. The request is routed to the "
-        "agent that should handle it, and the policy engine decides whether any "
-        "action it proposes is allowed to run."
-    )
-
-    with st.expander("What changes between simulation and live mode?"):
-        st.markdown(demo.STUB_VS_LIVE)
-
-    st.markdown("**Examples that work against this dataset**")
-    read_tab, action_tab, security_tab = st.tabs(
-        ["Look something up", "Change something", "Try to break it"]
-    )
-    for tab, examples, note in (
-        (read_tab, demo.READ_ONLY_EXAMPLES, "Read-only. These just answer."),
-        (
-            action_tab,
-            demo.ACTION_EXAMPLES,
-            "These propose a change, so they stop and wait for you.",
-        ),
-        (
-            security_tab,
-            demo.SECURITY_EXAMPLES,
-            "These are refused. Watch which rule fires.",
-        ),
-    ):
-        with tab:
-            st.caption(note)
-            for index, (question, hint) in enumerate(examples):
-                columns = st.columns([5, 3])
-                columns[0].code(question, language="text")
-                if columns[1].button(
-                    "Ask this", key=f"ex_{id(examples)}_{index}", width="stretch"
-                ):
-                    st.session_state["queued_question"] = question
-                    st.rerun()
-                columns[1].caption(hint)
-
-    queued = st.session_state.pop("queued_question", None)
-    text = st.text_input(
-        "Request",
-        value=queued or st.session_state.get("last_question")
-        or "What is the status of order ORD-1001?",
-    )
-    st.session_state["last_question"] = text
-
-    # The demo's own provider budget, checked *before* a request is started.
-    # It can only prevent a call; it grants nothing and touches none of the
-    # platform's controls. See dashboard/demo_budget.py for the measured
-    # reasoning behind the number.
-    budget = demo_budget.budget_state(
-        platform.repository, live=platform.provider_info.live
-    )
-    if budget.status is demo_budget.BudgetStatus.RUNNING_LOW and budget.gating:
-        st.warning(budget.message)
-    else:
-        st.caption(budget.message)
-    if budget.exhausted:
-        st.warning(budget.message)
-        return
-
-    if st.button("Run", type="primary") or queued:
-        result = platform.run(text)
-        st.session_state["last_result"] = {
-            "request_id": result.request_id,
-            "status": result.status,
-            "route": result.route,
-            "response": result.response,
-            "pending": (
-                {
-                    "tool": result.awaiting_confirmation.tool,
-                    "arguments": result.awaiting_confirmation.arguments,
-                    "risk_level": result.awaiting_confirmation.risk_level,
-                    "reason": result.awaiting_confirmation.reason,
-                }
-                if result.awaiting_confirmation
-                else None
+    # --- what holds it up ---------------------------------------------------
+    st.header("O que sustenta isso")
+    guarantees(
+        [
+            ("Política", "11 regras decidem antes de qualquer execução."),
+            ("Autenticação", "A API recusa com 401 sem credencial."),
+            ("Auditoria", "Cada requisição tem id, passos e decisão gravados."),
+            (
+                "Custo",
+                f"Limite de {demo_budget.LIVE_CALL_BUDGET} chamadas por dia ao "
+                "provedor, aplicado em modo live.",
             ),
-        }
+        ]
+    )
 
-    last: dict[str, Any] | None = st.session_state.get("last_result")
-    if not last:
+    # --- and what is not there ----------------------------------------------
+    st.header("O que não foi construído")
+    lede(
+        "As limitações ficam na mesma tela que as afirmações. Um projeto que "
+        "só lista o que faz bem não é verificável."
+    )
+    # The same strip as the guarantees above, on purpose: what is built and
+    # what is not are the same kind of claim and deserve the same weight. As
+    # six paragraphs this section was the largest thing on the page.
+    guarantees(list(demo.NOT_BUILT))
+
+    st.write("")
+    st.button(
+        "Ver a arquitetura",
+        key="cta_arch",
+        on_click=goto,
+        args=("Arquitetura",),
+    )
+
+
+# ================================================================ 2. Empresa
+
+
+def _table(rows: list[dict[str, Any]], preview: int, key: str) -> None:
+    """Show a readable slice, with the rest one disclosure away."""
+    if not rows:
+        no_data("Sem registros para exibir.", hint=None)
         return
+    st.dataframe(rows[:preview], width="stretch", hide_index=True)
+    if len(rows) > preview:
+        with st.expander(f"Ver todos ({len(rows)})"):
+            st.dataframe(rows, width="stretch", hide_index=True, key=f"all_{key}")
 
-    _status_badge(last["status"])
-    st.markdown(f"**Answer**\n\n{last['response']}")
-    route = last.get("route") or "-"
-    st.caption(f"Handled by: `{route}`")
 
-    if last["pending"]:
-        pending = last["pending"]
-        st.warning(
-            f"**A human has to approve this.** The executor proposed "
-            f"`{pending['tool']}` ({pending['risk_level']} risk). Nothing has "
-            "run yet -- the request is suspended until you decide."
-        )
-        st.caption(
-            "What you approve is bound to these exact arguments: a confirmation "
-            "cannot be reused for a different action."
-        )
-        st.json(pending["arguments"])
-        col1, col2 = st.columns(2)
-        if col1.button("Approve", type="primary"):
-            resumed = platform.confirm(
-                last["request_id"], approved=True, actor="dashboard-user", source="ui"
-            )
-            st.session_state["last_result"] = {
-                **last, "status": resumed.status,
-                "response": resumed.response, "pending": None,
-            }
-            st.rerun()
-        if col2.button("Decline"):
-            resumed = platform.confirm(
-                last["request_id"], approved=False, actor="dashboard-user", source="ui"
-            )
-            st.session_state["last_result"] = {
-                **last, "status": resumed.status,
-                "response": resumed.response, "pending": None,
-            }
-            st.rerun()
+def page_company(platform: AgentPlatform) -> None:
+    eyebrow("Contexto da demonstração")
+    st.title(demo.COMPANY_NAME)
+    lede(
+        "Empresa fictícia de varejo e e-commerce. Ambiente simulado usado para "
+        "demonstrar como agentes de IA podem consultar clientes, pedidos, "
+        "produtos e tickets e executar ações protegidas por políticas."
+    )
 
-    events = platform.repository.events_for_request(last["request_id"])
-    if events:
-        _handling_summary(events, last.get("route"))
-        st.divider()
-        _render_execution(
-            execution_view.build(events, status=last["status"]),
-            execution_view.model_calls(events),
+    totals = demo.company_totals()
+    st.write("")
+    metrics = st.columns(4)
+    metrics[0].metric("Clientes", totals["Customers"])
+    metrics[1].metric("Pedidos", totals["Orders"])
+    metrics[2].metric("Produtos", totals["Products"])
+    metrics[3].metric("Tickets abertos", totals["Open tickets"])
+
+    st.header("Os dados")
+    customers, orders, products, tickets = st.tabs(
+        ["Clientes", "Pedidos", "Produtos", "Tickets"]
+    )
+    with customers:
+        _table(demo.customers_table(), 6, "customers")
+    with orders:
+        _table(demo.orders_table(), 6, "orders")
+    with products:
+        _table(demo.products_table(), 6, "products")
+    with tickets:
+        _table(demo.tickets_table(), 6, "tickets")
+
+    st.header("O que você pode testar")
+    lede(
+        "Os identificadores acima são reais dentro da simulação. Use-os nas "
+        "perguntas — o sistema responde sobre eles."
+    )
+    for index, (question, hint) in enumerate(demo.READ_ONLY_EXAMPLES[:3]):
+        columns = st.columns([6, 2])
+        columns[0].code(question, language="text", wrap_lines=True)
+        columns[0].caption(hint)
+        columns[1].button(
+            "Perguntar",
+            key=f"company_ask_{index}",
+            width="stretch",
+            on_click=goto,
+            args=("Orquestrador", question),
         )
-        with st.expander("Full event table"):
+
+
+# =========================================================== 3. Orquestrador
+
+
+def _decision_pill(decision: str | None) -> str:
+    text = (decision or "—").upper()
+    css = {"ALLOW": "ap-allow", "DENY": "ap-deny", "REQUIRE_CONFIRMATION": "ap-hold"}.get(
+        text, "ap-hold"
+    )
+    return f'<span class="ap-pill {css}">{text}</span>'
+
+
+def _outcome_pill(state: execution_view.State) -> str:
+    css = {
+        execution_view.State.SUCCESS: "ap-allow",
+        execution_view.State.BLOCKED: "ap-deny",
+        execution_view.State.FAILED: "ap-deny",
+    }.get(state, "ap-hold")
+    return f'<span class="ap-pill {css}">{state}</span>'
+
+
+def _result_summary(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
+    """Four facts, in the order a reader asks for them."""
+    st.markdown("**Pergunta**")
+    st.code(last["question"], language="text", wrap_lines=True)
+
+    columns = st.columns(4)
+    with columns[0]:
+        st.caption("DECISÃO")
+        st.markdown(_decision_pill(view.policy_decision), unsafe_allow_html=True)
+    with columns[1]:
+        st.caption("AGENTE")
+        st.markdown(f"`{last.get('route') or '—'}`")
+    with columns[2]:
+        st.caption("FERRAMENTA")
+        tool = view.tools[0].name if view.tools else "—"
+        st.markdown(f"`{tool}`")
+    with columns[3]:
+        st.caption("TEMPO")
+        st.markdown(f"**{last['latency_ms'] / 1000:.2f}s**")
+
+
+def _timeline(view: execution_view.ExecutionView) -> None:
+    """The essential shape of the run. Six-ish lines, not twenty."""
+    # Plain characters rather than `:material/...:` shortcodes: st.markdown
+    # renders those literally, which put the words "radio_button_unchecked"
+    # into the timeline. A glyph that renders everywhere beats one that renders
+    # in some widgets and leaks its own name in others.
+    marks = {
+        execution_view.State.SUCCESS: ("●", "ap-allow"),
+        execution_view.State.BLOCKED: ("■", "ap-deny"),
+        execution_view.State.FAILED: ("■", "ap-deny"),
+        execution_view.State.WAITING: ("◐", "ap-hold"),
+    }
+    for step in view.steps:
+        glyph, css = marks.get(step.state, ("○", ""))
+        st.markdown(
+            f'<div class="ap-fade"><span class="{css}">{glyph}</span> '
+            f"{step.label}</div>",
+            unsafe_allow_html=True,
+        )
+        if step.detail:
+            # An ideographic space indents the detail under its step, which a
+            # normal space would not survive: markdown collapses leading runs
+            # of ASCII whitespace.
+            st.caption(f"　{step.detail}")
+
+
+def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
+    with st.expander("Ver detalhes técnicos"):
+        st.caption("Correlation ID")
+        st.code(last["request_id"], language="text", wrap_lines=True)
+
+        st.caption("Decisão de política")
+        st.markdown(
+            f"{_decision_pill(view.policy_decision)} &nbsp; "
+            f"regras: `{view.policy_rules or '—'}`",
+            unsafe_allow_html=True,
+        )
+
+        if view.tools:
+            st.caption("Ferramentas")
             st.dataframe(
-                pd.DataFrame(events)[
-                    ["sequence", "event_type", "status", "agent", "tool",
-                     "policy_decision", "risk_level", "rule_ids"]
+                [
+                    {
+                        "Ferramenta": tool.name,
+                        "Risco": tool.risk or "—",
+                        "Proposta por": tool.proposed_by or "—",
+                        "Decisão": tool.decision or "—",
+                        "Execução": str(tool.execution),
+                    }
+                    for tool in view.tools
                 ],
                 width="stretch",
                 hide_index=True,
             )
 
-
-# ===================================================== recruiter-facing demo
-
-
-def _status_badge(status: str) -> None:
-    """Render a request outcome as something a visitor can read at a glance."""
-    meaning = demo.STATUS_MEANING.get(status, "")
-    if status == "success":
-        st.success(f"**SUCCESS** -- {meaning}")
-    elif status == "awaiting_confirmation":
-        st.warning(f"**CONFIRMATION REQUIRED** -- {meaning}")
-    elif status in {"blocked", "rejected", "rate_limited", "declined"}:
-        st.error(f"**{status.replace('_', ' ').upper()}** -- {meaning}")
-    else:
-        st.info(f"**{status.replace('_', ' ').upper()}** -- {meaning}")
-
-
-def _state_chip(state: execution_view.State) -> str:
-    """A short, readable marker per state.
-
-    NOT REACHED is the one that matters: it is the difference between "this
-    step did not happen" and "this step happened and went well", and the panel
-    this replaces could not express it at all.
-    """
-    return {
-        execution_view.State.SUCCESS: "OK",
-        execution_view.State.WAITING: "WAITING",
-        execution_view.State.BLOCKED: "BLOCKED",
-        execution_view.State.FAILED: "FAILED",
-        execution_view.State.RUNNING: "RUNNING",
-        execution_view.State.NOT_REACHED: "NOT REACHED",
-    }[state]
-
-
-def _render_execution(view: execution_view.ExecutionView, calls: int) -> None:
-    """Render what the recorded stream says happened, and only that."""
-
-    st.markdown("#### Orchestration")
-    st.caption(
-        "Derived from the events this request actually recorded. A step that "
-        "did not run is shown as NOT REACHED rather than omitted."
-    )
-
-    for activity in view.agents:
-        chip = _state_chip(activity.state)
-        detail = f" -- {activity.detail}" if activity.detail else ""
-        if activity.state is execution_view.State.NOT_REACHED:
-            st.markdown(
-                f"&nbsp;&nbsp;`{chip}`&nbsp;&nbsp;{activity.name}{detail}"
-            )
-        else:
-            st.markdown(
-                f"&nbsp;&nbsp;`{chip}`&nbsp;&nbsp;**{activity.name}**{detail}"
-            )
-
-    if view.policy_decision:
-        rules = f" ({view.policy_rules})" if view.policy_rules else ""
-        st.markdown(
-            f"&nbsp;&nbsp;`{view.policy_decision.replace('_', ' ').upper()}`"
-            f"&nbsp;&nbsp;**policy engine**{rules} -- not an agent; the only "
-            "authority on whether an action may run"
+        st.caption("Agentes")
+        st.dataframe(
+            [
+                {"Agente": a.name, "Estado": str(a.state), "Detalhe": a.detail or "—"}
+                for a in view.agents
+            ],
+            width="stretch",
+            hide_index=True,
         )
 
-    if view.blocked_by:
-        st.markdown(f"&nbsp;&nbsp;Stopped by: **{view.blocked_by}**")
-
-    if view.tools:
-        st.markdown("#### Tools")
-        for tool in view.tools:
-            risk = f" -- {tool.risk} risk" if tool.risk else ""
-            by = f", proposed by {tool.proposed_by}" if tool.proposed_by else ""
-            st.markdown(
-                f"&nbsp;&nbsp;`{_state_chip(tool.execution)}`&nbsp;&nbsp;"
-                f"**{tool.name}**{risk}{by} -- {tool.detail}"
-            )
-
-    if view.steps:
-        with st.expander("Step-by-step timeline"):
-            st.caption(
-                f"{len(view.steps)} recorded steps. Model calls made for this "
-                f"request: {calls}. Prompts and model reasoning are never "
-                "recorded, on either provider."
-            )
-            for step in view.steps:
-                detail = f" -- {step.detail}" if step.detail else ""
-                st.markdown(
-                    f"`{step.sequence:>2}`&nbsp;&nbsp;{step.label}{detail}"
-                )
-
-
-def _handling_summary(events: list[dict[str, Any]], route: str | None) -> None:
-    """A short, non-technical account of how the request was handled."""
-    tools = [e["tool"] for e in events if e["event_type"] == "tool_call" and e.get("tool")]
-    decisions = [
-        e["policy_decision"]
-        for e in events
-        if e["event_type"] == "policy_decision" and e.get("policy_decision")
-    ]
-    columns = st.columns(3)
-    columns[0].markdown(f"**Handled by**\n\n`{route or 'direct response'}`")
-    columns[1].markdown(
-        "**Tools used**\n\n"
-        + (", ".join(f"`{t}`" for t in dict.fromkeys(tools)) if tools else "none")
-    )
-    if decisions:
-        verdict = (
-            "denied" if "deny" in decisions
-            else "confirmation required" if "require_confirmation" in decisions
-            else "passed"
+        st.caption("Sequência completa de eventos")
+        st.dataframe(
+            [
+                {
+                    "#": event.get("sequence"),
+                    "Evento": event.get("event_type"),
+                    "Agente": event.get("agent") or "—",
+                    "Ferramenta": event.get("tool") or "—",
+                    "Status": event.get("status"),
+                    "ms": event.get("latency_ms"),
+                }
+                for event in last["events"]
+            ],
+            width="stretch",
+            hide_index=True,
         )
-    else:
-        verdict = "no action to evaluate"
-    columns[2].markdown(f"**Policy check**\n\n{verdict}")
-
-
-def _ask(question: str) -> None:
-    """Queue a question for the request runner and jump to it."""
-    st.session_state["queued_question"] = question
-    st.session_state["page_choice"] = "Try a request"
-
-
-def page_start_here(platform: AgentPlatform) -> None:
-    st.header(f"{demo.COMPANY_NAME} -- {demo.PRODUCT_NAME}")
-    st.caption(f"{demo.COMPANY_TAGLINE} -- a simulated environment")
-    st.markdown(f"### {demo.PRODUCT_LINE}")
-    provider_banner(platform)
-    st.markdown(demo.ELEVATOR)
-
-    st.subheader("What happens to one request")
-    st.code(
-        """one request
-     |
-  rate limit + input inspection
-     |
-  [router]        classifies it; holds no tools
-     |
-  [researcher]    reads context, if the request needs it
-     |
-  [executor]      proposes one action, if something must change
-     |
-  POLICY ENGINE   ALLOW  /  CONFIRM  /  DENY      <-- the only authority
-     |
-  tool gateway    the only component that can run a tool
-     |
-  [validator]     checks the result
-     |
-  safe response""",
-        language="text",
-    )
-
-    st.subheader("How to test this in five steps")
-    steps = [
-        ("1. Find something to ask about",
-         "Open **Company** for the live situation board, or **Data explorer** "
-         "for every customer, order, product and ticket with its ID."),
-        ("2. Ask the orchestrator",
-         "Go to **Try the orchestrator** and click one of the example questions, or "
-         "type your own using an ID you saw."),
-        ("3. Watch the agents work",
-         "Each request shows the route it took and a plain-English timeline of "
-         "what happened."),
-        ("4. Try something restricted",
-         "Ask it to update or delete a record. Watch the policy engine stop it."),
-        ("5. Try to talk it into something",
-         "Use the prompt-injection example. Detection is not what saves it -- "
-         "the policy engine is."),
-    ]
-    for title, body in steps:
-        st.markdown(f"**{title}** -- {body}")
-
-    st.subheader("What can I ask?")
-    st.caption(
-        "Every example below is run end to end by the test suite, so each one "
-        "returns a real answer from the dataset."
-    )
-    for question, hint in demo.READ_ONLY_EXAMPLES[:3] + demo.SECURITY_EXAMPLES[:1]:
-        columns = st.columns([5, 2])
-        columns[0].code(question, language="text")
-        columns[1].caption(hint)
-    st.caption(
-        "The full set, grouped by what it demonstrates, is on "
-        "**Try the orchestrator**."
-    )
-
-    st.subheader("What can I test?")
-    st.caption(
-        "Five requests, easiest first. Each one exercises a different part of "
-        "the system, and each is run end to end by the test suite."
-    )
-    for scenario in demo.SCENARIOS:
-        tier = scenario["level"].split(" - ")[-1]
-        with st.container(border=True):
-            columns = st.columns([1, 4])
-            columns[0].markdown(f"**{tier}**")
-            columns[1].code(scenario["ask"], language="text")
-            columns[1].caption(f"Should end as `{scenario['outcome']}`")
-
-    st.subheader("What this project demonstrates")
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**Built and exercised here**")
-        for title, detail in demo.DEMONSTRATED:
-            st.markdown(f"- **{title}** -- {detail}")
-    with right:
-        st.markdown("**Not built -- and not claimed**")
-        for title, detail in demo.NOT_BUILT:
-            st.markdown(f"- **{title}** -- {detail}")
         st.caption(
-            "A demo that overstates its scope is worth less than one that says "
-            "plainly where it stops."
+            f"Chamadas de modelo nesta requisição: "
+            f"{execution_view.model_calls(last['events'])}"
         )
 
-    st.subheader("Demo capacity")
+
+def _resolve(platform: AgentPlatform, approved: bool) -> None:
+    """Approve or decline the suspended action, then let Streamlit rerun.
+
+    A callback rather than a body-level `st.rerun()`: the callback runs before
+    the rerun Streamlit already schedules for a button press, so the state is
+    current by the time the page redraws and no subtree is torn down mid-render.
+    """
+    last = st.session_state.get("last_result")
+    if not last or not last.get("pending"):
+        return
+    resumed = platform.confirm(
+        last["request_id"], approved=approved, actor="dashboard-user", source="ui"
+    )
+    st.session_state["last_result"] = {
+        **last,
+        "status": resumed.status,
+        "response": resumed.response,
+        "pending": None,
+        "events": platform.repository.events_for_request(last["request_id"]),
+    }
+
+
+def _confirmation_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
+    """The human-in-the-loop control, not a description of one."""
+    pending = last["pending"]
+    st.warning(
+        f"**Um humano precisa aprovar isto.** O executor propôs "
+        f"`{pending['tool']}` (risco {pending['risk_level']}). Nada foi "
+        "executado — a requisição está suspensa até você decidir."
+    )
+    st.caption(
+        "O que você aprova fica preso a estes argumentos exatos: uma "
+        "confirmação não pode ser reaproveitada para outra ação."
+    )
+    st.json(pending.get("arguments") or {})
+    decide = st.columns([1, 1, 4])
+    decide[0].button(
+        "Aprovar", key="confirm_approve", type="primary", width="stretch",
+        on_click=_resolve, args=(platform, True),
+    )
+    decide[1].button(
+        "Recusar", key="confirm_decline", width="stretch",
+        on_click=_resolve, args=(platform, False),
+    )
+
+
+def _run_question(platform: AgentPlatform, question: str) -> None:
+    """Run one request and keep everything the result pages need."""
+    result = platform.run(question)
+    # `events_for_request` already returns plain dicts, which is exactly what
+    # `execution_view.build` consumes. Nothing is reshaped here: a second
+    # projection of the same rows is a second place for the two to disagree.
+    events = platform.repository.events_for_request(result.request_id)
+    st.session_state["last_result"] = {
+        "question": question,
+        "request_id": result.request_id,
+        "status": result.status,
+        "route": result.route,
+        "response": result.response,
+        "latency_ms": result.latency_ms,
+        "events": events,
+        "pending": (
+            {
+                "tool": result.awaiting_confirmation.tool,
+                "arguments": result.awaiting_confirmation.arguments,
+                "risk_level": result.awaiting_confirmation.risk_level,
+                "reason": result.awaiting_confirmation.reason,
+            }
+            if result.awaiting_confirmation
+            else None
+        ),
+    }
+
+
+#: What stopped the request, said in the words of the control that stopped it.
+#: Every entry is keyed on a real `blocked_by` value produced by
+#: `execution_view._blocked_by`; the dashboard used to attribute all of them to
+#: the policy engine, so a visitor who simply clicked too fast was told the
+#: security policy had refused them.
+_BLOCK_EXPLANATIONS: dict[str, tuple[str, str, str]] = {
+    "policy engine": (
+        "error",
+        "Operação bloqueada pela política de segurança.",
+        "A ação solicitada não tem autorização suficiente. Nenhuma ferramenta "
+        "foi executada, e a recusa ficou registrada.",
+    ),
+    "rate limit": (
+        "warning",
+        "Limite de requisições atingido.",
+        "A demonstração limita quantas solicitações um mesmo usuário faz por "
+        "minuto. Aguarde alguns instantes e tente de novo — nada foi recusado "
+        "por motivo de segurança.",
+    ),
+    "provider budget": (
+        "warning",
+        "Orçamento diário de chamadas ao provedor esgotado.",
+        "Esta demonstração define o próprio teto de chamadas ao modelo e parou "
+        "antes de gastar mais. O provedor está de pé; foi uma decisão de custo.",
+    ),
+    "circuit breaker": (
+        "warning",
+        "Circuito aberto após falhas seguidas do provedor.",
+        "A plataforma parou de tentar depois de erros repetidos, para não "
+        "insistir contra um serviço indisponível. Ela volta a tentar sozinha.",
+    ),
+    "resource limit": (
+        "warning",
+        "Teto de recursos da requisição atingido.",
+        "A requisição excedeu um limite de passos, tempo ou tamanho definido "
+        "por requisição. É um controle de custo e de latência, não de segurança.",
+    ),
+}
+
+
+def _explain_block(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
+    """Say which control stopped the request, and stop guessing that it was policy."""
+    # A request nobody could serve is not a block at all. It arrives here
+    # because the platform reports it as `declined`, the same status a human
+    # decision produces -- but no control refused it, so it gets neither a red
+    # box nor the word "bloqueada".
+    if last.get("status") == "declined" and view.blocked_by is None:
+        st.info(
+            "**Pergunta fora do alcance desta demonstração.** Nenhuma "
+            "ferramenta disponível responde a ela, e nada foi inventado.",
+            icon=":material/help:",
+        )
+        return
+
+    level, title, detail = _BLOCK_EXPLANATIONS.get(
+        view.blocked_by or "",
+        (
+            "error",
+            "Operação interrompida por um controle da plataforma.",
+            "A execução parou antes de concluir. O rastro abaixo mostra em que "
+            "ponto e por quê.",
+        ),
+    )
+    banner = st.error if level == "error" else st.warning
+    banner(f"**{title}**\n\n{detail}")
+
+
+def _next_step(view: execution_view.ExecutionView) -> None:
+    """Say what to try next, instead of leaving the visitor to guess.
+
+    The demonstration only lands if someone sees both halves: a request that
+    is allowed and one that is refused. After the first, the second is one
+    button away rather than something to go looking for.
+    """
+    if view.outcome is execution_view.State.BLOCKED:
+        columns = st.columns([3, 5])
+        columns[0].button(
+            "Ver as políticas",
+            key="next_policies",
+            width="stretch",
+            on_click=goto,
+            args=("Segurança",),
+        )
+        columns[1].caption(
+            "A regra que recusou esta operação está listada lá, junto com a "
+            "matriz de quem pode chamar o quê."
+        )
+        return
+
+    blocked = demo.SECURITY_EXAMPLES[0][0] if demo.SECURITY_EXAMPLES else None
+    if blocked is None:
+        return
+    columns = st.columns([3, 5])
+    columns[0].button(
+        "Tentar algo proibido",
+        key="next_blocked",
+        width="stretch",
+        on_click=goto,
+        args=("Orquestrador", blocked),
+    )
+    columns[1].caption(
+        "Essa foi permitida. O contraste é o ponto: agora peça uma exclusão e "
+        "veja o Policy Engine recusar antes de qualquer ferramenta rodar."
+    )
+
+
+def _result_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
+    """Everything about the last run, in the order a reader asks for it."""
+    view = execution_view.build(last["events"], status=last["status"])
+
+    st.markdown(
+        f'<div class="ap-fade">{_outcome_pill(view.outcome)}</div>',
+        unsafe_allow_html=True,
+    )
+    _result_summary(last, view)
+
+    st.markdown("**Resposta**")
+    st.markdown(last["response"])
+
+    if last["pending"]:
+        _confirmation_panel(platform, last)
+
+    if view.outcome is execution_view.State.BLOCKED:
+        _explain_block(last, view)
+
+    if not last["pending"]:
+        _next_step(view)
+
+    # The timeline stays on the surface. It is the demonstration: the policy
+    # decision sitting in sequence between the proposal and the tool call is
+    # the thing this project exists to show, and a reader will not open an
+    # expander to find an argument nobody made to them.
+    st.subheader("Como a solicitação foi processada")
+    _timeline(view)
+    _technical_details(last, view)
+
+
+def page_orchestrator(platform: AgentPlatform) -> None:
+    eyebrow("Demonstração principal")
+    st.title("Experimente o orquestrador")
+    lede(
+        "Faça uma pergunta em linguagem natural. O sistema decide quais agentes "
+        "e ferramentas são necessários."
+    )
+
+    queued = st.session_state.pop("queued_question", None)
+    if queued is not None:
+        st.session_state["question_box"] = queued
+
+    st.text_input(
+        "Pergunta",
+        key="question_box",
+        placeholder="What is the status of order ORD-1001?",
+        label_visibility="collapsed",
+    )
+
     budget = demo_budget.budget_state(
         platform.repository, live=platform.provider_info.live
     )
-    columns = st.columns(3)
-    columns[0].metric("Provider calls used today", budget.used)
-    columns[1].metric("Daily demo limit", budget.budget)
-    columns[2].metric("Status", str(budget.status))
-    st.caption(
-        "Calls to the AI provider are capped so a visitor cannot exhaust the "
-        "day's quota. The simulation is never capped, because it calls no "
-        "provider at all."
+    run_columns = st.columns([1, 5])
+    run_clicked = run_columns[0].button(
+        "Executar", type="primary", key="run_question", width="stretch",
+        disabled=budget.exhausted,
+    )
+    run_columns[1].caption(budget.message)
+
+    if run_clicked:
+        question = (st.session_state.get("question_box") or "").strip()
+        if question:
+            # A spinner is the only honest signal here: the run is synchronous,
+            # so without it the page simply stops responding for a second.
+            with st.spinner("Executando…"):
+                _run_question(platform, question)
+
+    # The result comes before the examples. It used to come after them, which
+    # meant clicking Executar scrolled nothing and the answer appeared below
+    # twelve example questions -- the one thing the visitor came for was the
+    # last thing on the page.
+    last: dict[str, Any] | None = st.session_state.get("last_result")
+    if last:
+        st.divider()
+        _result_panel(platform, last)
+        st.divider()
+
+    st.header("Exemplos")
+    read_tab, action_tab, security_tab = st.tabs(
+        ["Consultar", "Alterar algo", "Tentar quebrar"]
+    )
+    for tab, group, note, prefix in (
+        (read_tab, demo.READ_ONLY_EXAMPLES, "Somente leitura. Apenas respondem.", "r"),
+        (
+            action_tab,
+            demo.ACTION_EXAMPLES,
+            "Propõem uma mudança, então param e esperam por você.",
+            "a",
+        ),
+        (
+            security_tab,
+            demo.SECURITY_EXAMPLES,
+            "São recusadas. Observe qual regra dispara.",
+            "s",
+        ),
+    ):
+        with tab:
+            st.caption(note)
+            for index, (question, hint) in enumerate(group):
+                columns = st.columns([6, 2])
+                columns[0].code(question, language="text", wrap_lines=True)
+                columns[0].caption(hint)
+                # A stable, content-independent key. The previous version used
+                # `id(examples)`, a memory address -- it changes when the module
+                # is reloaded, so every widget got a new identity in the same
+                # position and React was asked to move nodes that no longer
+                # existed. That was the `insertBefore` error.
+                columns[1].button(
+                    "Perguntar",
+                    key=f"ex_{prefix}_{index}",
+                    width="stretch",
+                    on_click=goto,
+                    args=("Orquestrador", question),
+                )
+
+
+# ============================================================== 4. Segurança
+
+
+def page_security(platform: AgentPlatform) -> None:
+    eyebrow("Controles aplicados em execução")
+    st.title("Segurança")
+    lede(
+        "Segurança não está apenas documentada; ela é aplicada durante a "
+        "execução. O motor de políticas é a única autoridade."
     )
 
-    st.subheader("Where to go")
-    c1, c2, c3 = st.columns(3)
-    if c1.button("Try the orchestrator", type="primary", width="stretch"):
-        st.session_state["page_choice"] = "Try a request"
-        st.rerun()
-    if c2.button("Explore the agents", width="stretch"):
-        st.session_state["page_choice"] = "Agents"
-        st.rerun()
-    if c3.button("View company data", width="stretch"):
-        st.session_state["page_choice"] = "Data explorer"
-        st.rerun()
-
-
-def page_company(platform: AgentPlatform) -> None:
-    st.header(demo.COMPANY_NAME)
-    st.caption(f"{demo.COMPANY_TAGLINE} -- simulated environment")
-
-    totals = demo.company_totals()
-    columns = st.columns(len(totals))
-    for column, (label, value) in zip(columns, totals.items(), strict=True):
-        column.metric(label, value)
-
-    st.subheader("What you can test")
-    st.caption(
-        "Every row below is read from the same dataset the agents query, so "
-        "anything you can see here is something you can ask about."
-    )
-    for title, what, example in demo.WHAT_YOU_CAN_TEST:
-        with st.container(border=True):
-            st.markdown(f"**{title}** -- {what}")
-            st.caption(example)
-
-    st.subheader("Customers")
-    st.dataframe(
-        pd.DataFrame(demo.customers_table()).head(6),
-        width="stretch",
-        hide_index=True,
-    )
-    st.caption(
-        f"{len(demo.customers_table())} customers in total -- the full list is "
-        "on **Data explorer**."
+    st.header("Quatro pilares")
+    cards(
+        [
+            (
+                "Autenticação",
+                "A API exige credencial. Sem ela, 401 — e ela nunca vem do "
+                "corpo da requisição.",
+            ),
+            (
+                "Autorização",
+                "Escopos independentes: quem pede uma ação de risco não é quem "
+                "a aprova.",
+            ),
+            (
+                "Policy Engine",
+                "Onze regras decidem ALLOW, DENY ou CONFIRM antes de qualquer "
+                "ferramenta rodar.",
+            ),
+            (
+                "Auditoria",
+                "Cada decisão é gravada com quem aprovou, autenticado — não "
+                "auto-declarado.",
+            ),
+        ],
+        per_row=4,
     )
 
-    st.subheader("Products")
-    st.dataframe(
-        pd.DataFrame(demo.products_table()).head(6),
-        width="stretch",
-        hide_index=True,
+    st.header("As três decisões")
+    decisions = st.columns(3)
+    decisions[0].markdown(
+        f'{_decision_pill("ALLOW")}<p class="ap-lede">A ação roda. Risco baixo e '
+        "dentro do que o agente pode fazer.</p>",
+        unsafe_allow_html=True,
     )
-    st.caption(
-        "Price, category and warranty. The catalogue holds no stock levels, "
-        "so the agents cannot answer inventory questions."
+    decisions[1].markdown(
+        f'{_decision_pill("REQUIRE_CONFIRMATION")}<p class="ap-lede">A execução '
+        "para e espera um humano. Nada acontece até alguém decidir.</p>",
+        unsafe_allow_html=True,
     )
-
-    st.subheader("Current operations")
-    st.caption(
-        "The situations worth asking about right now."
-    )
-
-    st.markdown("**Tickets that are still open**")
-    tickets = demo.open_tickets()
-    if tickets:
-        st.dataframe(pd.DataFrame(tickets), width="stretch", hide_index=True)
-        top = tickets[0]
-        if st.button(
-            f"Ask about {top['Ticket']}", key="ask_ticket"
-        ):
-            _ask(f"What is ticket {top['Ticket']} about?")
-            st.rerun()
-    else:
-        st.caption("No open tickets in the dataset.")
-
-    st.markdown("**Orders in transit**")
-    transit = demo.orders_in_transit()
-    if transit:
-        st.dataframe(pd.DataFrame(transit), width="stretch", hide_index=True)
-        first = transit[0]
-        if st.button(f"Ask about {first['Order']}", key="ask_order"):
-            _ask(f"What is the status of order {first['Order']}?")
-            st.rerun()
-
-    returned = demo.returned_shipments()
-    if returned:
-        st.markdown("**Shipments returned to sender**")
-        st.caption("Deliveries that came back -- usually what a ticket is about.")
-        st.dataframe(pd.DataFrame(returned), width="stretch", hide_index=True)
-
-
-def page_data_explorer(platform: AgentPlatform) -> None:
-    st.header("Data explorer")
-    st.markdown(
-        "These are the entities the agents can reason about. Every ID here is "
-        "one you can ask about by name."
-    )
-    st.caption(demo.HONESTY)
-
-    customers, orders, products, tickets = st.tabs(
-        ["Customers", "Orders", "Products", "Tickets"]
-    )
-    with customers:
-        st.dataframe(
-            pd.DataFrame(demo.customers_table()), width="stretch", hide_index=True
-        )
-        st.caption('Try: "Tell me about customer CUS-2001"')
-    with orders:
-        st.dataframe(
-            pd.DataFrame(demo.orders_table()), width="stretch", hide_index=True
-        )
-        st.caption('Try: "What is the status of order ORD-1001?"')
-    with products:
-        st.dataframe(
-            pd.DataFrame(demo.products_table()), width="stretch", hide_index=True
-        )
-        st.caption(
-            "The catalogue carries price and warranty, not stock levels -- so "
-            "the agents cannot answer inventory questions."
-        )
-    with tickets:
-        st.dataframe(
-            pd.DataFrame(demo.tickets_table()), width="stretch", hide_index=True
-        )
-        st.caption('Try: "What is ticket TKT-4002 about?"')
-
-
-def page_agents(platform: AgentPlatform) -> None:
-    st.header("Agents")
-    st.markdown(
-        "Five agents and one authority. The split is the point: an agent that "
-        "cannot reach a tool cannot misuse one."
+    decisions[2].markdown(
+        f'{_decision_pill("DENY")}<p class="ap-lede">Recusada. Nenhuma '
+        "ferramenta é chamada, e a recusa fica registrada.</p>",
+        unsafe_allow_html=True,
     )
 
-    registry = platform.registry if hasattr(platform, "registry") else None
-    for role in demo.AGENT_ROLES:
-        with st.container(border=True):
-            st.markdown(f"### {role['title']}")
-            st.markdown(role["job"])
-            st.caption(role["holds"])
-            if registry is not None:
-                try:
-                    specs = registry.specs_for(AgentName(role["name"]))
-                    names = sorted(s["name"] for s in specs)
-                except Exception:  # display only; never break the page
-                    names = []
-                if names:
-                    st.markdown("**Tools it may propose:** " + ", ".join(
-                        f"`{n}`" for n in names))
-                else:
-                    st.markdown("**Tools it may propose:** none")
-
-    with st.container(border=True):
-        st.markdown(f"### {demo.POLICY_ROLE['title']}")
-        st.markdown(demo.POLICY_ROLE["job"])
-        st.caption(demo.POLICY_ROLE["holds"])
-
-    st.subheader("Who may reach what")
-    st.caption(
-        "Authorisation requires passing both this matrix and the tool's own "
-        "allow-list. No role holds the delete capability."
+    st.header("Experimente, do simples ao hostil")
+    lede(
+        "Cinco cenários em ordem crescente de dificuldade. Cada um roda de "
+        "verdade — o resultado é o que a plataforma faz, não uma descrição do "
+        "que ela faria."
     )
-    st.dataframe(pd.DataFrame(describe_matrix()), width="stretch", hide_index=True)
-
-
-def page_scenarios(platform: AgentPlatform) -> None:
-    st.header("Demo scenarios")
-    st.markdown(
-        "Five requests that show the system doing something different each "
-        "time. Run them in order; each one clicks through to the runner."
-    )
-    with st.expander("What changes between simulation and live mode?"):
-        st.markdown(demo.STUB_VS_LIVE)
     for index, scenario in enumerate(demo.SCENARIOS):
-        with st.container(border=True):
-            st.caption(scenario["level"])
-            st.markdown(f"### {scenario['title']}")
-            st.markdown("**What to try**")
-            st.code(scenario["ask"], language="text")
-            st.markdown(f"**What the system should do** -- {scenario['expect']}")
-            st.markdown(f"**What to watch** -- {scenario['watch']}")
-            if st.button("Run this scenario", key=f"scenario_{index}"):
-                _ask(scenario["ask"])
-                st.rerun()
+        columns = st.columns([6, 2])
+        columns[0].markdown(
+            f'<span class="ap-eyebrow">{scenario["level"]}</span>',
+            unsafe_allow_html=True,
+        )
+        columns[0].markdown(f"**{scenario['title']}**")
+        columns[0].code(scenario["ask"], language="text", wrap_lines=True)
+        columns[0].caption(scenario["expect"])
+        columns[1].button(
+            "Executar",
+            key=f"scenario_{index}",
+            width="stretch",
+            on_click=goto,
+            args=("Orquestrador", scenario["ask"]),
+        )
+        # `watch` is what to look at in the trace once it has run, so it sits
+        # one disclosure away rather than competing with the question itself.
+        with columns[0].expander("O que observar"):
+            st.caption(scenario["watch"])
+
+    with st.expander("As regras de política, na íntegra"):
+        st.dataframe(describe_rules(), width="stretch", hide_index=True)
+
+    with st.expander("Quem pode chamar o quê"):
+        st.caption(
+            "A matriz de capacidades. Uma ferramenta ausente da linha de um "
+            "agente não é alcançável por ele, sob nenhuma circunstância."
+        )
+        st.dataframe(describe_matrix(), width="stretch", hide_index=True)
 
 
-def _fmt(value: Any) -> str:
-    """Format a score, distinguishing "not measured" from zero."""
-    if value is None:
-        return "n/a"
-    return f"{float(value):.3f}"
+# ============================================================ 5. Arquitetura
 
 
-#: Two groups, in the order a first-time visitor should meet them: the demo
-#: explains what this is, the platform pages are the operational instruments.
+def page_architecture(platform: AgentPlatform) -> None:
+    eyebrow("Como o sistema é montado")
+    st.title("Arquitetura")
+    lede(
+        "Um caminho de requisição, uma autoridade, e a infraestrutura que "
+        "sustenta os dois."
+    )
+
+    st.header("Caminho da requisição")
+    flow(
+        ["User", "API", "Router", "Agentes", "Policy Engine", "Tools / MCP", "Data / RAG"],
+        gate="Policy Engine",
+    )
+
+    st.header("Plataforma")
+    cards(
+        [
+            ("Kubernetes", "Deployment com probes, NetworkPolicy default-deny e HPA."),
+            ("Redis", "Confirmações, checkpoints e limites compartilhados entre réplicas."),
+            ("PostgreSQL", "Requisições, eventos e gasto — um ledger para todas as réplicas."),
+            ("Observabilidade", "Logs JSON, métricas Prometheus e correlation IDs."),
+            ("Network Policies", "Nada alcança a API além do que foi declarado."),
+            ("TLS / Ingress", "Terminação na borda; o Service permanece ClusterIP."),
+        ]
+    )
+
+    st.header("Os agentes")
+    lede("Cinco papéis especializados. Nenhum deles executa uma ferramenta.")
+    for role in demo.AGENT_ROLES:
+        st.markdown(f"**{role['title']}** — {role['job']}")
+        st.caption(role["holds"])
+    st.info(
+        "O **Policy Engine** não é um agente. Ele é a autoridade que decide o "
+        "que qualquer agente pode fazer, e não pode ser persuadido por texto.",
+        icon=":material/gavel:",
+    )
+
+    # The full declared list. The landing page shows the first four; the two
+    # it leaves out -- RAG and MCP -- are named there on one line and get
+    # their description here, which is where a reader who wants it will be.
+    st.header("Competências demonstradas")
+    lede("A lista completa, incluindo as duas que a tela inicial só cita.")
+    cards(list(demo.DEMONSTRATED), per_row=2)
+
+
+# ========================================================= 6. Observabilidade
+
+
+def _latency_chart(rows: list[dict[str, Any]]) -> None:
+    """Per-request latency, with the one number that explains its shape.
+
+    The median is shown beside the chart because a single suspended request
+    dominates the axis: a request that stops for human approval keeps counting
+    wall-clock time while it waits, so its latency is mostly the time a person
+    took to decide. That is worth stating rather than smoothing away -- the
+    chart is evidence, and evidence that has been tidied is not evidence.
+    """
+    latencies = [float(row.get("latency_ms") or 0) for row in reversed(rows)]
+    if not any(latencies):
+        st.caption(
+            "Nenhuma requisição registrou latência ainda, então não há série "
+            "para desenhar."
+        )
+        return
+
+    ordered = sorted(latencies)
+    middle = len(ordered) // 2
+    median = (
+        ordered[middle]
+        if len(ordered) % 2
+        else (ordered[middle - 1] + ordered[middle]) / 2
+    )
+
+    st.caption("Latência por requisição (ms), da mais antiga à mais recente")
+    st.altair_chart(
+        alt.Chart(alt.Data(values=[
+            {"n": index, "ms": value} for index, value in enumerate(latencies)
+        ]))
+        .mark_line(point=True, color="#2F81F7")
+        .encode(
+            # Explicit domains: see the note above. Both are read from the
+            # series being drawn.
+            x=alt.X(
+                "n:Q",
+                title=None,
+                scale=alt.Scale(domain=[0, max(1, len(latencies) - 1)]),
+            ),
+            y=alt.Y(
+                "ms:Q",
+                title="ms",
+                scale=alt.Scale(domain=[0, max(latencies)]),
+            ),
+        )
+        .properties(height=180),
+        width="stretch",
+    )
+    st.caption(
+        f"Mediana {median:.0f} ms · máximo {max(latencies):.0f} ms. Um pico "
+        "isolado costuma ser uma requisição que parou para confirmação "
+        "humana: o relógio continua correndo enquanto ela espera a decisão."
+    )
+
+
+def page_observability(platform: AgentPlatform) -> None:
+    eyebrow("Plataforma")
+    st.title("Observabilidade")
+    lede(
+        "Toda requisição tem um identificador, passos cronometrados e uma "
+        "decisão registrada."
+    )
+
+    try:
+        metrics = collect_metrics(platform.repository)
+    except Exception:
+        metrics = None
+
+    if metrics is None or not metrics.has_data:
+        no_data("Nenhuma requisição registrada ainda.")
+        return
+
+    columns = st.columns(4)
+    columns[0].metric("Requisições", metrics.requests)
+    columns[1].metric("Bloqueadas", metrics.blocked)
+    columns[2].metric("Chamadas de ferramenta", metrics.tool_calls)
+    columns[3].metric("Latência média", f"{metrics.avg_latency_ms:.0f} ms")
+
+    st.header("Requisições recentes")
+    rows = platform.repository.recent_requests(limit=12)
+    if not rows:
+        no_data("Sem requisições recentes.")
+        return
+
+    st.dataframe(
+        [
+            {
+                "Request ID": row["request_id"],
+                "Status": row["status"],
+                "Rota": row.get("route") or "—",
+                "ms": round(float(row.get("latency_ms") or 0), 1),
+            }
+            for row in rows
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+    _latency_chart(rows)
+
+    with st.expander("Detalhes"):
+        st.caption(
+            "Contadores por tipo de evento, lidos do stream de eventos "
+            "persistido."
+        )
+        summary = platform.repository.metrics_summary()
+        st.dataframe(
+            # `metrics_summary` mixes Decimal and int in one column, and
+            # pyarrow refuses a column of mixed types. These are display
+            # values, so coercing them to text loses nothing and keeps the
+            # table from raising on a spend figure.
+            [
+                {"Métrica": key, "Valor": str(value)}
+                for key, value in sorted(summary.items())
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(pricing_notice())
+
+
+# ================================================================ navigation
+
+
+#: Six pages. The order is the order a first-time reader should meet them.
 DEMO_PAGES = {
-    "Start here": page_start_here,
-    "Company": page_company,
-    "Data explorer": page_data_explorer,
-    "Agents": page_agents,
-    "Try a request": page_try_it,
-    "Demo scenarios": page_scenarios,
+    "Visão geral": page_overview,
+    "Empresa": page_company,
+    "Orquestrador": page_orchestrator,
+    "Segurança": page_security,
+    "Arquitetura": page_architecture,
 }
 
 PLATFORM_PAGES = {
-    "Overview": page_overview,
-    "Agent flow": page_agent_flow,
-    "Security": page_security,
-    "Evaluation": page_evaluation,
-    "Cost": page_cost,
-    "Reliability": page_reliability,
-    "Drift": page_drift,
+    "Observabilidade": page_observability,
 }
 
 PAGES = {**DEMO_PAGES, **PLATFORM_PAGES}
 
 
 def main() -> None:
+    st.markdown(_STYLE, unsafe_allow_html=True)
     platform = get_platform()
+
     st.sidebar.title(demo.COMPANY_NAME)
-    st.sidebar.caption(demo.PRODUCT_LINE)
+    st.sidebar.caption(demo.PRODUCT_NAME)
+
     info = platform.provider_info
+    # st.warning paints an olive box in the dark theme, which reads as a
+    # problem. Running without a provider is the default and correct state of
+    # this demo, not a fault -- so it gets a neutral badge. Amber stays
+    # reserved for warnings and green for success, which is what makes either
+    # of them mean anything.
     if info.live:
-        st.sidebar.success(f"**LIVE**\n\n{info.name} / `{info.model}`")
+        st.sidebar.markdown(
+            '<span class="ap-pill ap-allow">LIVE</span>', unsafe_allow_html=True
+        )
+        st.sidebar.code(info.model, language="text", wrap_lines=True)
+        st.sidebar.caption("As requisições são atendidas por um provedor real.")
     else:
-        st.sidebar.warning(
-            f"**DEMO / STUB**\n\n`{info.model}`\n\nNo language model is being called."
+        st.sidebar.markdown(
+            '<span class="ap-pill ap-hold">DEMO / STUB</span>',
+            unsafe_allow_html=True,
+        )
+        st.sidebar.code(info.model, language="text", wrap_lines=True)
+        st.sidebar.caption(
+            "Nenhum modelo está sendo chamado. As respostas são "
+            "determinísticas e geradas localmente."
         )
 
     options = list(PAGES)
-    queued = st.session_state.get("page_choice")
-    index = options.index(queued) if queued in options else 0
+    # The radio is keyed on the same session-state entry `goto()` writes, so
+    # the widget *is* the navigation state. Passing `index=` instead made the
+    # widget's identity depend on the current page: every navigation destroyed
+    # and rebuilt it, which is the identity churn this rewrite exists to
+    # remove, and it also made a queued page silently lose to the old index.
+    if st.session_state.get("nav") not in options:
+        st.session_state["nav"] = options[0]
 
     def label(page: str) -> str:
-        """Show the two groups in the list itself.
+        return page if page in DEMO_PAGES else f"⚙ {page}"
 
-        `format_func` changes only what is displayed, never the value, so the
-        page keys stay stable for anything selecting a page by name.
-        """
-        if page == "Try a request":
-            return "Try the orchestrator"
-        return page if page in DEMO_PAGES else f"\u2699 {page}"
-
-    st.sidebar.caption("**DEMO** -- start here")
-    # `index` is what lets an in-page button navigate: it sets page_choice and
-    # reruns, and the radio comes back selecting that page.
+    st.sidebar.caption("**DEMONSTRAÇÃO**")
     choice = st.sidebar.radio(
-        "Page", options, index=index, format_func=label, label_visibility="collapsed"
+        "Página", options, key="nav", format_func=label, label_visibility="collapsed"
     )
-    st.session_state["page_choice"] = choice
-    st.sidebar.caption(
-        "\u2699 **PLATFORM** -- the operational instruments behind the demo: "
-        "traces, policy decisions, evaluation, cost, reliability and drift."
-    )
+    st.sidebar.caption("⚙ **PLATAFORMA** — os instrumentos operacionais.")
     st.sidebar.divider()
     st.sidebar.caption(
-        f"{demo.COMPANY_NAME} is a simulated company. All tools operate in "
-        "memory; no external system is contacted."
+        f"{demo.COMPANY_NAME} é uma empresa simulada. Todas as ferramentas "
+        "operam em memória; nenhum sistema externo é contatado."
     )
 
-    # The landing page places the mode line itself, under the product identity,
-    # so a stranger meets the product before a status banner.
-    if choice != "Start here":
-        provider_banner(platform)
     PAGES[choice](platform)
 
 

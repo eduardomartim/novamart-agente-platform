@@ -47,13 +47,13 @@ successful run rather than a fresh one.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Offline suite | **PASS** | 1493 passed on Linux; 1520 passed / 3 environment failures on this Windows host |
+| Offline suite | **PASS** | 1495 passed / 23 skipped / 3 environment failures on this Windows host |
 | Security suite | **PASS** | 727 passed |
 | Shuffled order, two seeds | **PASS** | 1493 × 2 on Linux |
 | Container suite | **PASS** | 26 passed (last run before the daemon stopped) |
 | Scale, ten replicas | **PASS** | `tests/integration/test_scale.py`, 9 tests |
 | Load | **PASS** | `scripts/load_test.py`; see Performance |
-| ruff / mypy strict | **PASS** | clean, 92 source files |
+| ruff / mypy strict | **PASS** | ruff clean across the repository; mypy strict clean, 91 source files |
 
 The three Windows failures are `test_index_path_portability.py`. They install a
 wheel and run a subprocess with `PYTHONPATH` narrowed to that install, so the
@@ -61,6 +61,17 @@ subprocess inherits only the interpreter's own site-packages. On this host the
 project's interpreter is blocked by Smart App Control, so the runs use the base
 interpreter, which has no `numpy`. The same three pass on Linux. **Environment,
 not code** — and the test was deliberately not weakened to accommodate it.
+
+## Dashboard
+
+| Item | Status | Evidence |
+|---|---|---|
+| Six pages render, empty and seeded | **PASS** | `test_dashboard_pages.py`, `test_dashboard_states.py` |
+| React `insertBefore` regression guarded | **PASS** | `test_dashboard_stability.py`, 10 tests: static patterns plus real widget ids across navigation |
+| ALLOW / DENY / CONFIRM → approve and decline | **PASS** | driven end to end through `AppTest` and in the browser |
+| Browser console clean | **PASS** | no errors, no warnings, after walking all six pages and running a blocked request |
+| Responsive 1440 / 1366 / 1024 / 768 / 375 | **PASS** | measured: no horizontal overflow, no clipped element, sidebar ≤ 29% |
+| Recruiter acceptance content | **PASS** | `test_recruiter_discovery.py`, `test_recruiter_experience.py` |
 
 ## Observability
 

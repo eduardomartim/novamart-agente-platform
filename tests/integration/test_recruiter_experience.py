@@ -96,11 +96,14 @@ def test_landing_leads_with_identity_not_a_technical_warning(seeded_db):
     first impression was a yellow box about a missing environment variable.
     """
     app = _render(seeded_db)
-    headers = [e.value for e in app.header]
-    assert headers, "the landing page has no header"
-    first = headers[0]
-    assert demo.COMPANY_NAME in first or "Orchestrator" in first, (
+    titles = [e.value for e in app.title]
+    assert titles, "the landing page has no title"
+    first = titles[0]
+    assert demo.COMPANY_NAME in first, (
         f"the landing page leads with {first!r} instead of the product identity"
+    )
+    assert not list(app.main.warning), (
+        "a warning banner renders in the main column of the landing page"
     )
 
 
@@ -108,13 +111,13 @@ def test_landing_leads_with_identity_not_a_technical_warning(seeded_db):
 def test_landing_names_the_company_and_the_product(seeded_db):
     text = _main_text(_render(seeded_db))
     assert demo.COMPANY_NAME in text
-    assert "orchestrat" in text.lower(), "the page never says what the product is"
+    assert "orquestra" in text.lower(), "the page never says what the product is"
 
 
 @pytest.mark.slow
 def test_landing_says_it_is_a_simulation(seeded_db):
     text = _main_text(_render(seeded_db)).lower()
-    assert "simulat" in text, "a visitor could mistake this for a real company"
+    assert "simula" in text, "a visitor could mistake this for a real company"
 
 
 @pytest.mark.slow
@@ -159,7 +162,7 @@ def test_landing_shows_what_can_be_asked(seeded_db):
 
 @pytest.mark.slow
 def test_runner_offers_every_category_of_example(seeded_db):
-    text = _main_text(_render(seeded_db, "Try a request"))
+    text = _main_text(_render(seeded_db, "Orquestrador"))
     for question, _ in demo.READ_ONLY_EXAMPLES[:2]:
         assert question in text
     for question, _ in demo.ACTION_EXAMPLES[:1]:
@@ -173,7 +176,7 @@ def test_runner_offers_every_category_of_example(seeded_db):
 
 @pytest.mark.slow
 def test_agents_page_names_every_real_agent(seeded_db):
-    text = _main_text(_render(seeded_db, "Agents"))
+    text = _main_text(_render(seeded_db, "Arquitetura"))
     for role in demo.AGENT_ROLES:
         assert role["title"] in text, f"{role['title']} is missing from the agents page"
 
@@ -181,9 +184,9 @@ def test_agents_page_names_every_real_agent(seeded_db):
 @pytest.mark.slow
 def test_agents_page_says_policy_engine_is_not_an_agent(seeded_db):
     """Architectural literacy: the authority is not one of the agents."""
-    text = _main_text(_render(seeded_db, "Agents")).lower()
+    text = _main_text(_render(seeded_db, "Arquitetura")).lower()
     assert "policy engine" in text
-    assert "not an agent" in text, (
+    assert "não é um agente" in text, (
         "the page does not distinguish the policy engine from the agents"
     )
 
@@ -194,14 +197,14 @@ def test_agents_page_says_policy_engine_is_not_an_agent(seeded_db):
 @pytest.mark.slow
 def test_scenarios_are_ordered_by_difficulty(seeded_db):
     """A visitor should be able to start easy and escalate."""
-    text = _main_text(_render(seeded_db, "Demo scenarios"))
+    text = _main_text(_render(seeded_db, "Segurança"))
     for scenario in demo.SCENARIOS:
         assert scenario["level"] in text, f"level {scenario['level']} missing"
 
 
 @pytest.mark.slow
 def test_data_explorer_shows_ids_a_visitor_can_use(seeded_db):
-    text = _main_text(_render(seeded_db, "Data explorer"))
+    text = _main_text(_render(seeded_db, "Empresa"))
     for marker in ("CUS-2001", "ORD-1001", "TKT-4001"):
         assert marker in text, f"{marker} is not visible in the data explorer"
 
@@ -214,11 +217,15 @@ def test_stub_mode_is_stated_in_plain_language(seeded_db):
     app = _render(seeded_db)
     blob = " ".join(
         e.value
-        for e in list(app.warning) + list(app.info) + list(app.sidebar.warning)
+        for e in list(app.warning) + list(app.info)
+        + list(app.sidebar.markdown) + list(app.sidebar.caption)
         if isinstance(getattr(e, "value", None), str)
     ).lower()
-    assert "stub" in blob or "simulation" in blob
-    assert "no ai provider" in blob or "no language model" in blob or "deterministic" in blob
+    assert "stub" in blob or "simula" in blob
+    # Reading only the alert boxes used to pass on the model id
+    # `deterministic-stub-v1` happening to contain the word. That is an
+    # accident, not a statement anyone wrote for a visitor.
+    assert "nenhum modelo" in blob or "nenhum provedor" in blob or "determinís" in blob
 
 
 # --------------------------------------------------------------- navigation
@@ -236,7 +243,7 @@ def test_navigation_puts_the_demo_before_the_technical_pages(seeded_db):
     app = _render(seeded_db)
     labels = list(app.radio[0].options)
 
-    assert labels[0] == "Start here", "the guided entry point is not first"
+    assert labels[0] == "Visão geral", "the guided entry point is not first"
 
     demo_count = len(dashboard_app.DEMO_PAGES)
     demo_labels, platform_labels = labels[:demo_count], labels[demo_count:]
@@ -254,9 +261,16 @@ def test_navigation_puts_the_demo_before_the_technical_pages(seeded_db):
 
 @pytest.mark.slow
 def test_the_runner_is_labelled_for_a_visitor_not_a_developer(seeded_db):
-    """"Try a request" is a page key; "Try the orchestrator" is an invitation."""
-    app = _render(seeded_db)
-    assert "Try the orchestrator" in list(app.radio[0].options)
+    """The runner must invite, not name a route.
+
+    The sidebar is a six-item index of nouns, so the invitation is the page's
+    own title -- which is the first thing read after clicking the entry.
+    """
+    app = _render(seeded_db, "Orquestrador")
+    titles = [e.value for e in app.title]
+    assert any("Experimente" in title for title in titles), (
+        f"the runner page opens with {titles!r}, which reads as a route name"
+    )
 
 
 # ------------------------------------------------- what engineering is shown
@@ -266,7 +280,7 @@ def test_the_runner_is_labelled_for_a_visitor_not_a_developer(seeded_db):
 def test_landing_states_what_is_demonstrated(seeded_db):
     """A technical reader wants the engineering, not adjectives."""
     text = _main_text(_render(seeded_db)).lower()
-    for capability in ("orchestrat", "policy", "confirmation", "injection"):
+    for capability in ("orquestra", "policy", "confirmação", "injection"):
         assert capability in text, f"the landing page never mentions {capability}"
 
 
@@ -275,18 +289,24 @@ def test_landing_separates_demonstrated_from_not_built(seeded_db):
     """Claiming production integrations that do not exist would be dishonest."""
     text = _main_text(_render(seeded_db))
     assert any(
-        marker in text for marker in ("Not built", "not built", "Limitations")
+        marker in text
+        for marker in ("não foi construído", "Limitações", "não construído")
     ), "the landing page does not distinguish what is built from what is not"
 
 
 @pytest.mark.slow
-def test_landing_shows_a_test_matrix_without_digging(seeded_db):
-    """The five things worth trying should be visible on the first screen."""
-    text = _main_text(_render(seeded_db))
+def test_the_test_matrix_is_one_click_from_the_landing_page(seeded_db):
+    """The five things worth trying must be on one page, not scattered.
+
+    They used to sit on the landing page. The six-page structure gives the
+    escalation its own home on Segurança -- still one sidebar click away, and
+    still all five together rather than one per page.
+    """
+    text = _main_text(_render(seeded_db, "Segurança"))
     levels = [s["level"].split(" - ")[-1] for s in demo.SCENARIOS]
     found = sum(1 for level in levels if level in text)
-    assert found >= 4, (
-        f"only {found} of {len(levels)} test levels are visible on the landing page"
+    assert found == len(levels), (
+        f"only {found} of {len(levels)} test levels are visible on Segurança"
     )
 
 

@@ -40,19 +40,27 @@ def test_inflected_write_verbs_route_to_the_action_path(request_text):
 
 
 @pytest.mark.parametrize(
-    "request_text",
+    ("request_text", "expected"),
     [
-        "Can you delete order ORD-1001?",
-        "Could you update order ORD-1002?",
-        "Is it possible to remove order ORD-1001?",
-        "Which orders were deleted?",
+        ("Can you delete order ORD-1001?", "researcher"),
+        ("Could you update order ORD-1002?", "researcher"),
+        ("Is it possible to remove order ORD-1001?", "researcher"),
+        # No identifier, and nothing in the dataset records deletions, so no
+        # tool can serve this. It reaches the orchestrator's honest refusal
+        # instead of the researcher -- still the read-only side of the fork,
+        # which is what this test protects.
+        ("Which orders were deleted?", "direct_response"),
     ],
 )
-def test_questions_still_prefer_the_read_only_path(request_text):
+def test_questions_still_prefer_the_read_only_path(request_text, expected):
     """The conservative default survives: a question is not an instruction."""
-    assert StubProvider._choose_route(request_text) == "researcher", (
+    route = StubProvider._choose_route(request_text)
+    assert route != "executor", (
         f"{request_text!r} was escalated to the action path; ambiguity must "
         "resolve towards reading, not writing"
+    )
+    assert route == expected, (
+        f"{request_text!r} routed to {route!r}, expected {expected!r}"
     )
 
 

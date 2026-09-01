@@ -11,6 +11,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 from ..models import AgentName
+from .analytics import ANALYTICS_TOOL_DEFINITIONS
 from .fake_tools import TOOL_DEFINITIONS
 from .models import ToolDefinition, ToolNotRegisteredError
 
@@ -74,5 +75,12 @@ class ToolRegistry:
 
 
 def default_registry() -> ToolRegistry:
-    """The registry used by the demo platform."""
-    return ToolRegistry(TOOL_DEFINITIONS)
+    """The registry used by the demo platform.
+
+    Two sources, one registry. The record tools answer questions about a single
+    row; the analytics tools answer questions about the set. Both are static
+    definitions declared in code and both pass through the same authorisation,
+    so adding the second group changed what can be asked and nothing about who
+    may ask it.
+    """
+    return ToolRegistry([*TOOL_DEFINITIONS, *ANALYTICS_TOOL_DEFINITIONS])

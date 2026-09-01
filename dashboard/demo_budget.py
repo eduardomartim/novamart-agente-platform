@@ -135,13 +135,13 @@ def calls_used_today(repository: _Repository) -> int:
 
 
 EXHAUSTED_MESSAGE = (
-    "**Today's demo capacity is spent.** This demonstration sets its own daily "
-    "budget for calls to the AI provider, and the system stopped *before* "
-    "making another one.\n\n"
-    "The provider is not down and nothing has failed -- this deployment simply "
-    "chose not to spend more today. The deterministic simulation remains fully "
-    "available: it runs the same orchestration graph, the same policy engine "
-    "and the same security controls."
+    "**A capacidade de hoje foi gasta.** Esta demonstração define o "
+    "próprio limite diário de chamadas ao provedor de IA, e o sistema "
+    "parou *antes* de fazer mais uma.\n\n"
+    "O provedor está de pé e nada quebrou — este ambiente apenas escolheu "
+    "não gastar mais hoje. A simulação determinística segue inteira: mesmo "
+    "grafo de orquestração, mesmo motor de políticas, mesmos controles de "
+    "segurança."
 )
 
 
@@ -171,9 +171,10 @@ def budget_state(repository: _Repository, *, live: bool) -> BudgetState:
             status=status,
             gating=False,
             message=(
-                "Simulation mode makes no provider calls, so nothing is "
-                f"charged against today's demo capacity ({used} of "
-                f"{LIVE_CALL_BUDGET} used). The budget applies to live mode."
+                f"{used} de {LIVE_CALL_BUDGET} chamadas de modelo hoje. Em "
+                "modo simulação elas são locais e não consomem cota de "
+                "provedor nenhum; o contador é real e o limite só passa a "
+                "valer em modo live."
             ),
         )
 
@@ -189,15 +190,14 @@ def budget_state(repository: _Repository, *, live: bool) -> BudgetState:
     requests = remaining // TYPICAL_CALLS_PER_REQUEST
     if status is BudgetStatus.RUNNING_LOW:
         message = (
-            f"**Demo capacity is running low.** {remaining} of "
-            f"{LIVE_CALL_BUDGET} provider calls remain today, roughly "
-            f"{requests} more requests."
+            f"**A capacidade da demonstração está acabando.** Restam "
+            f"{remaining} de {LIVE_CALL_BUDGET} chamadas ao provedor hoje, "
+            f"cerca de {requests} requisições."
         )
     else:
         message = (
-            f"Live mode. {remaining} of {LIVE_CALL_BUDGET} provider calls "
-            f"remain in today's demo capacity, roughly {requests} more "
-            "requests."
+            f"Modo live. Restam {remaining} de {LIVE_CALL_BUDGET} chamadas ao "
+            f"provedor no limite de hoje, cerca de {requests} requisições."
         )
 
     return BudgetState(

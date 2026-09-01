@@ -28,6 +28,15 @@ SAMPLES = {
     "update_record": {"record_id": "ORD-1001", "field": "status", "value": "x"},
     "send_email": {"to": "a@b.com", "subject": "s", "body": "b"},
     "delete_record": {"record_id": "ORD-1001"},
+    # The aggregate reads. They take no identifier -- that is the point of
+    # them -- but they are handlers like any other and must refuse a direct
+    # call just the same.
+    "count_customers": {},
+    "revenue_total": {},
+    "list_orders": {},
+    "top_customers": {},
+    "open_tickets": {},
+    "business_overview": {},
 }
 
 
