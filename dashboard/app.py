@@ -148,6 +148,9 @@ _STYLE = """
     border: 1px solid currentColor;
   }
   .ap-allow { color: var(--ap-green); }
+  /* Not an outcome anyone should read as good or bad -- the platform simply
+     had nothing to answer with. */
+  .ap-neutral { color: var(--ap-muted); }
   .ap-deny  { color: var(--ap-red); }
   .ap-hold  { color: var(--ap-amber); }
 
@@ -291,6 +294,24 @@ def live_call_count(platform: AgentPlatform) -> int:
     if platform.provider_info.live:
         return int(summary.get("llm_calls", 0) or 0)
     return 0
+
+
+def as_prose(text: str) -> str:
+    """Prepare platform text for `st.markdown` without letting it reinterpret it.
+
+    Streamlit reads `$...$` as inline LaTeX. Brazilian currency is written
+    `R$`, so a sentence with two amounts in it -- which every order summary and
+    every revenue total has -- pairs the dollar signs, swallows them, and
+    renders the text between as maths. Measured on the real page:
+
+        "Os 40 pedidos somam R 33.002,50. Descontando (R 6.374,90),
+         o valor efetivo é R$ 26.627,60."
+
+    Three amounts, two spellings, one sentence. Escaping at the boundary fixes
+    every caller at once: the tools keep writing `R$`, and the CLI and the API
+    are unaffected because they never went through a markdown renderer.
+    """
+    return text.replace("$", chr(92) + "$")
 
 
 def goto(page: str, question: str | None = None) -> None:
@@ -493,6 +514,9 @@ def _outcome_pill(state: execution_view.State) -> str:
         execution_view.State.SUCCESS: "ap-allow",
         execution_view.State.BLOCKED: "ap-deny",
         execution_view.State.FAILED: "ap-deny",
+        # Neutral on purpose. Nothing refused anything, so the badge must not
+        # borrow the colour of a denial.
+        execution_view.State.OUT_OF_SCOPE: "ap-neutral",
     }.get(state, "ap-hold")
     return f'<span class="ap-pill {css}">{state}</span>'
 
@@ -529,6 +553,7 @@ def _timeline(view: execution_view.ExecutionView) -> None:
         execution_view.State.BLOCKED: ("■", "ap-deny"),
         execution_view.State.FAILED: ("■", "ap-deny"),
         execution_view.State.WAITING: ("◐", "ap-hold"),
+        execution_view.State.OUT_OF_SCOPE: ("○", "ap-neutral"),
     }
     for step in view.steps:
         glyph, css = marks.get(step.state, ("○", ""))
@@ -721,18 +746,6 @@ _BLOCK_EXPLANATIONS: dict[str, tuple[str, str, str]] = {
 
 def _explain_block(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
     """Say which control stopped the request, and stop guessing that it was policy."""
-    # A request nobody could serve is not a block at all. It arrives here
-    # because the platform reports it as `declined`, the same status a human
-    # decision produces -- but no control refused it, so it gets neither a red
-    # box nor the word "bloqueada".
-    if last.get("status") == "declined" and view.blocked_by is None:
-        st.info(
-            "**Pergunta fora do alcance desta demonstração.** Nenhuma "
-            "ferramenta disponível responde a ela, e nada foi inventado.",
-            icon=":material/help:",
-        )
-        return
-
     level, title, detail = _BLOCK_EXPLANATIONS.get(
         view.blocked_by or "",
         (
@@ -796,12 +809,18 @@ def _result_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
     _result_summary(last, view)
 
     st.markdown("**Resposta**")
-    st.markdown(last["response"])
+    st.markdown(as_prose(last["response"] or ""))
 
     if last["pending"]:
         _confirmation_panel(platform, last)
 
-    if view.outcome is execution_view.State.BLOCKED:
+    if view.outcome is execution_view.State.OUT_OF_SCOPE:
+        st.info(
+            "**Pergunta fora do alcance desta demonstração.** Nenhuma "
+            "ferramenta disponível responde a ela, e nada foi inventado.",
+            icon=":material/help:",
+        )
+    elif view.outcome is execution_view.State.BLOCKED:
         _explain_block(last, view)
 
     if not last["pending"]:

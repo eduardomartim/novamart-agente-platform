@@ -69,21 +69,43 @@ class CountingStub(StubProvider):
 # ============================================ the regression, tool by tool
 
 
+#: Facts from the record, not identifiers echoed back.
+#:
+#: These used to be `ORD-1001`, `CUS-2001` and English statuses, because that
+#: is what the tool summaries said. They now answer in Portuguese and name the
+#: customer rather than the row -- a visitor should not need to know
+#: `CUS-2001` -- so the markers are the data the reply is *about*.
+#:
+#: A stronger check than the identifier was: an answer describing the wrong
+#: order still contained "ORD-1001" whenever the question did. An amount and a
+#: name do not survive being about the wrong record.
 @pytest.mark.parametrize(
     ("question", "tool", "must_contain"),
     [
-        ("What is the status of order ORD-1001?", "get_order", ["ORD-1001", "shipped"]),
-        ("Tell me about customer CUS-2001", "get_customer", ["CUS-2001", "Ana Ribeiro"]),
+        (
+            "What is the status of order ORD-1001?",
+            "get_order",
+            ["Ana Ribeiro", "429,70", "enviado"],
+        ),
+        (
+            "Tell me about customer CUS-2001",
+            "get_customer",
+            ["Ana Ribeiro", "Ouro"],
+        ),
         (
             "Show me the orders for customer CUS-2001",
             "list_customer_orders",
-            ["CUS-2001", "ORD-1001"],
+            ["Ana Ribeiro", "4 pedidos"],
         ),
-        ("What is ticket TKT-4002 about?", "get_ticket", ["TKT-4002", "ORD-1003"]),
+        (
+            "What is ticket TKT-4002 about?",
+            "get_ticket",
+            ["Chamado", "prioridade"],
+        ),
         (
             "What is the status of Ana Ribeiro's order?",
             "find_customer",
-            ["Ana Ribeiro", "CUS-2001"],
+            ["Ana Ribeiro", "Ouro"],
         ),
     ],
 )

@@ -2500,3 +2500,49 @@ be authorised and written down, which is the whole point of having it.
 
 Authorised explicitly by the project owner before implementation, after a
 read-only audit reported the collision and offered three options.
+
+---
+
+## §40 The protected baseline was changed a second time, on purpose (UI/UX P0)
+
+`src/agent_platform/tools/fake_tools.py` is one of the twelve protected files.
+It was modified. This is the record of that decision, for the same reason §39
+exists: a baseline that can be regenerated quietly is not a control.
+
+**Why.** A visual audit walked the dashboard as a recruiter. Asking about a
+customer by name -- the one example the landing page offers -- returned:
+
+> Ana Ribeiro (CUS-2001) is a gold tier customer in Sao Paulo. They have 4
+> order(s): ORD-1001 (shipped, R$ 429.7); ORD-1003 (cancelled, R$ 1299.0)…
+
+English, in a Portuguese interface, and built out of identifiers the project
+had already decided a visitor should never need to know. The aggregate tools
+added in the V3.0 P0 round already avoid this: they return a `summary` the
+orchestrator renders instead of the payload. The record tools did not, so the
+same platform answered two ways depending on which tool ran.
+
+**What was changed.** Five handlers -- `get_order`, `get_customer`,
+`get_ticket`, `list_customer_orders`, `find_customer` -- now return a
+`summary` alongside the record they already returned. Nothing was removed:
+every structured field, every identifier and every existing key is exactly
+where it was, so the trace, the API and any caller reading the structure are
+unaffected. Four small formatting helpers were added beside them.
+
+Not changed: `require_gateway` on every handler, the tool definitions, risk
+levels, capabilities, allowed agents, argument schemas, or anything the policy
+engine reads. The diff adds sentences; it does not move a decision.
+
+**The baseline.** One line of `PROTECTED.sha256`:
+
+```
+old  08e026cd392f9cccaed206c12b6c9bc2735e97a71b626bd4d2dac529810d45a5
+new  5ee68dcd1a1f623795d571666377bbd7abba15cd353575cbc8f4a38a16caf184
+```
+
+`check_protected.py` reported exactly `1 of 12` before the update, which is
+the evidence the change was contained, and `12/12` after. The gate was not
+weakened or bypassed -- it did its job, which is to make an intended change
+visible and force it to be authorised and written down.
+
+Authorised explicitly by the project owner, who named the file and the purpose
+before implementation began.

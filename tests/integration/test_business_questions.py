@@ -285,7 +285,98 @@ def test_a_record_question_with_an_identifier_still_reaches_its_tool(platform):
     answer, status, tools = ask(platform, "What is the status of order ORD-1001?")
     assert tools == ["get_order"], tools
     assert status == "success"
-    assert "ORD-1001" in answer
+
+    # The answer no longer echoes the identifier back, so it is checked against
+    # the record instead: the customer who owns ORD-1001 and its real total.
+    # A stronger assertion than the id was -- an answer about the wrong order
+    # would have contained "ORD-1001" too, as long as the question did.
+    order = data.ORDERS["ORD-1001"]
+    assert data.CUSTOMERS[order["customer_id"]]["name"] in answer
+    assert "429,70" in answer, answer
+
+
+@pytest.mark.slow
+def test_a_customer_lookup_by_name_reads_naturally(platform):
+    """The example the landing page offers, answered the way a person speaks.
+
+    It used to come back as "Ana Ribeiro (CUS-2001) is a gold tier customer in
+    Sao Paulo. They have 4 order(s): ORD-1001 (shipped, R$ 429.7); ..." --
+    English, and built out of identifiers this project decided a visitor should
+    never need to know.
+    """
+    answer, status, tools = ask(platform, "What is the status of Ana Ribeiro's order?")
+    assert tools == ["find_customer"], tools
+    assert status == "success"
+
+    assert "Ana Ribeiro" in answer
+    for identifier in ("CUS-", "ORD-", "TKT-"):
+        assert identifier not in answer, (
+            f"the answer exposes an internal identifier: {answer}"
+        )
+    assert "R$" in answer, "an answer about orders that names no amount"
+    assert " is a " not in answer and "order(s)" not in answer, (
+        f"the English summary is still being rendered: {answer}"
+    )
+
+
+@pytest.mark.slow
+def test_an_order_lookup_reads_naturally(platform):
+    answer, status, tools = ask(platform, "What is the status of order ORD-1001?")
+    assert tools == ["get_order"], tools
+    assert status == "success"
+    # The identifier was in the question, so naming the customer instead of
+    # echoing it back is the improvement.
+    assert "Ana Ribeiro" in answer
+    assert "R$" in answer
+
+
+@pytest.mark.slow
+def test_a_ticket_lookup_reads_naturally(platform):
+    answer, status, tools = ask(platform, "What is ticket TKT-4002 about?")
+    assert tools == ["get_ticket"], tools
+    assert status == "success"
+    assert "TKT-" not in answer, f"the answer exposes a ticket id: {answer}"
+    assert any(word in answer.lower() for word in ("aberto", "escalado", "resolvido"))
+
+
+def test_every_record_tool_still_returns_its_structured_payload():
+    """Humanising added a sentence; it must not have removed a field.
+
+    The trace, the API and every caller reading the structure depend on these,
+    and a `summary` that replaced them would be a regression dressed as a fix.
+    """
+    from agent_platform.tools import fake_tools
+    from agent_platform.tools.execution import gateway_execution
+
+    with gateway_execution():
+        order = fake_tools.get_order("ORD-1001")
+        customer = fake_tools.get_customer("CUS-2001")
+        ticket = fake_tools.get_ticket("TKT-4001")
+        history = fake_tools.list_customer_orders("CUS-2001")
+        found = fake_tools.find_customer("Ana")
+
+    assert order["order"]["order_id"] == "ORD-1001"
+    assert order["order"]["total_brl"] > 0
+    assert customer["customer"]["customer_id"] == "CUS-2001"
+    assert ticket["ticket"]["ticket_id"] == "TKT-4001"
+    assert history["order_count"] == len(history["orders"])
+    assert all(o["order_id"].startswith("ORD-") for o in history["orders"])
+    assert found["matches"][0]["customer_id"].startswith("CUS-")
+
+    for payload in (order, customer, ticket, history, found):
+        assert payload["found"] is True
+        assert isinstance(payload["summary"], str) and payload["summary"].strip()
+
+
+def test_a_missing_record_still_says_so_without_a_summary():
+    """A refusal must not acquire a sentence that implies a result."""
+    from agent_platform.tools import fake_tools
+    from agent_platform.tools.execution import gateway_execution
+
+    with gateway_execution():
+        missing = fake_tools.get_order("ORD-9999")
+    assert missing["found"] is False
+    assert "summary" not in missing
 
 
 def test_every_analytics_tool_is_read_only_and_low_risk():

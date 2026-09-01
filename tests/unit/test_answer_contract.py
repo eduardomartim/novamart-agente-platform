@@ -121,7 +121,10 @@ def test_an_outage_is_not_reported_as_missing_information():
     assert missing.outcome is AnswerOutcome.INSUFFICIENT_EVIDENCE
     assert outage.outcome is not missing.outcome
     assert "unavailable" in outage.text.lower()
-    assert "document" in missing.text.lower()
+    # The two texts must stay distinguishable. "document" was the marker until
+    # the refusal stopped talking about documents -- it described how the
+    # platform looked rather than what the reader asked about.
+    assert "base de conhecimento" in missing.text.lower()
 
 
 def test_a_limit_is_not_reported_as_missing_information():

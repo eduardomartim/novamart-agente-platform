@@ -174,7 +174,10 @@ def test_a_valid_request_returns_the_response_schema(client):
 
     assert body["status"] == "success"
     assert body["provider"] == "stub"
-    assert "ORD-1001" in body["response"]
+    # The reply names the customer and the amount rather than echoing the
+    # identifier back; the contract is that `response` carries the answer, not
+    # that it repeats the question.
+    assert "Ana Ribeiro" in body["response"]
 
 
 def test_internals_are_not_exposed(client):

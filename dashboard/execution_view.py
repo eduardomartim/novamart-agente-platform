@@ -46,6 +46,11 @@ class State(Enum):
     SUCCESS = "SUCCESS"
     BLOCKED = "BLOCKED"
     FAILED = "FAILED"
+    #: The platform declined to answer because nothing it has could. Not a
+    #: block: no control refused anything and no rule fired. It used to render
+    #: as BLOCKED, so the honest refusal arrived wearing the colour of a
+    #: security denial and contradicted the message beside it.
+    OUT_OF_SCOPE = "SEM RESPOSTA"
 
     def __str__(self) -> str:  # pragma: no cover - display helper
         return self.value
@@ -314,7 +319,18 @@ def _steps(events: list[dict[str, Any]]) -> tuple[Step, ...]:
     return tuple(sorted(steps, key=lambda s: s.sequence))
 
 
-def _outcome(status: str, blocked_by: str | None) -> State:
+def _outcome(status: str, blocked_by: str | None, *, proposed: bool = True) -> State:
+    # `declined` covers two different events: a human refused a suspended
+    # action, and the platform had no tool that could answer at all. Both
+    # arrive with no `blocked_by`, because in neither case did a control refuse
+    # anything -- so the discriminator is whether an action ever existed.
+    #
+    # A human who declines is deciding about a proposal, and something was
+    # stopped: that stays BLOCKED. A question nothing could serve never reached
+    # a proposal, and calling it blocked told the reader a control had refused
+    # them while the message beside it said the opposite.
+    if status == "declined" and blocked_by is None and not proposed:
+        return State.OUT_OF_SCOPE
     if status in {"blocked", "rejected", "rate_limited", "declined"}:
         return State.BLOCKED
     if status == "awaiting_confirmation":
@@ -351,7 +367,17 @@ def build(events: list[dict[str, Any]], *, status: str) -> ExecutionView:
         tools=_tool_activity(ordered),
         policy_decision=decision,
         policy_rules=rules,
-        outcome=_outcome(status, blocked_by),
+        outcome=_outcome(
+            status,
+            blocked_by,
+            # An action was proposed if the trace holds one. Read from the
+            # recorded events, never inferred from the status.
+            proposed=any(
+                event.get("event_type")
+                in ("action_proposed", "confirmation_requested", "confirmation_resolved")
+                for event in ordered
+            ),
+        ),
         blocked_by=blocked_by,
     )
 

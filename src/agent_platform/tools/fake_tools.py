@@ -152,6 +152,48 @@ def search(query: str) -> dict[str, Any]:
     }
 
 
+#: Order and ticket vocabulary as a reader says it. The dataset stores the
+#: English key; only the sentence changes, never the stored value.
+_ORDER_STATUS_PT: Final[dict[str, str]] = {
+    "processing": "em processamento",
+    "shipped": "enviado",
+    "delivered": "entregue",
+    "cancelled": "cancelado",
+    "returned": "devolvido",
+}
+_TICKET_STATUS_PT: Final[dict[str, str]] = {
+    "open": "aberto",
+    "escalated": "escalado",
+    "resolved": "resolvido",
+}
+_PRIORITY_PT: Final[dict[str, str]] = {
+    "high": "alta",
+    "normal": "normal",
+    "low": "baixa",
+}
+_TIER_PT: Final[dict[str, str]] = {
+    "platinum": "Platinum",
+    "gold": "Ouro",
+    "standard": "Standard",
+}
+
+
+def _money(value: float) -> str:
+    """Brazilian currency, written the way a Brazilian reader expects."""
+    return "R$ " + f"{value:,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+
+
+def _customer_name(customer_id: str) -> str:
+    """A person's name, falling back to the identifier only if it is unknown."""
+    customer = _customers.get(customer_id)
+    return customer["name"] if customer else customer_id
+
+
+def _order_phrase(order: dict[str, Any]) -> str:
+    status = _ORDER_STATUS_PT.get(order["status"], order["status"])
+    return f"o pedido de {_money(order['total_brl'])} está {status}"
+
+
 def get_order(order_id: str) -> dict[str, Any]:
     require_gateway("get_order")
     order = _orders.get(order_id)
@@ -160,7 +202,19 @@ def get_order(order_id: str) -> dict[str, Any]:
     result = copy.deepcopy(order)
     shipment = shipment_for_order(order_id)
     result["shipment"] = copy.deepcopy(shipment) if shipment else None
-    return {"found": True, "order": result}
+
+    # The sentence a person reads. The record above is untouched and still
+    # carries every identifier, so the trace and any caller that wants the
+    # structure keep exactly what they had.
+    who = _customer_name(order["customer_id"])
+    status = _ORDER_STATUS_PT.get(order["status"], order["status"])
+    summary = (
+        f"O pedido de {who}, no valor de {_money(order['total_brl'])}, "
+        f"está {status}."
+    )
+    if order.get("tracking") and order["status"] in ("shipped", "delivered"):
+        summary += f" Código de rastreio: {order['tracking']}."
+    return {"found": True, "order": result, "summary": summary}
 
 
 def get_customer(customer_id: str) -> dict[str, Any]:
@@ -168,7 +222,15 @@ def get_customer(customer_id: str) -> dict[str, Any]:
     customer = _customers.get(customer_id)
     if customer is None:
         return {"found": False, "customer_id": customer_id}
-    return {"found": True, "customer": copy.deepcopy(customer)}
+    tier = _TIER_PT.get(customer["tier"], customer["tier"])
+    return {
+        "found": True,
+        "customer": copy.deepcopy(customer),
+        "summary": (
+            f"{customer['name']} é cliente do segmento {tier}, "
+            f"de {customer['city']}, desde {customer['since']}."
+        ),
+    }
 
 
 def list_customer_orders(customer_id: str) -> dict[str, Any]:
@@ -186,10 +248,23 @@ def list_customer_orders(customer_id: str) -> dict[str, Any]:
         key=lambda o: o["placed_on"],
         reverse=True,
     )
+    who = _customer_name(customer_id)
+    if not matches:
+        summary = f"{who} não tem pedidos registrados."
+    else:
+        total = sum(o["total_brl"] for o in matches)
+        listed = "; ".join(_order_phrase(o) for o in matches[:3])
+        more = "" if len(matches) <= 3 else f" e mais {len(matches) - 3}"
+        summary = (
+            f"{who} tem {len(matches)} "
+            f"{'pedido' if len(matches) == 1 else 'pedidos'}, somando "
+            f"{_money(total)}. Os mais recentes: {listed}{more}."
+        )
     return {
         "found": True,
         "customer_id": customer_id,
         "order_count": len(matches),
+        "summary": summary,
         "orders": [
             {
                 "order_id": o["order_id"],
@@ -247,7 +322,35 @@ def find_customer(name: str) -> dict[str, Any]:
         if len(matches) >= MAX_CUSTOMER_MATCHES:
             break
 
-    return {"found": bool(matches), "query": name, "matches": matches}
+    if not matches:
+        summary = f"Nenhum cliente encontrado com o nome “{name}”."
+    else:
+        first = matches[0]
+        tier = _TIER_PT.get(first["tier"], first["tier"])
+        summary = (
+            f"{first['name']} é cliente do segmento {tier}, de {first['city']}."
+        )
+        orders = first.get("orders") or []
+        if orders:
+            total = sum(o["total_brl"] for o in orders)
+            listed = "; ".join(_order_phrase(o) for o in orders[:3])
+            more = "" if len(orders) <= 3 else f" e mais {len(orders) - 3}"
+            summary += (
+                f" Tem {len(orders)} "
+                f"{'pedido' if len(orders) == 1 else 'pedidos'}, somando "
+                f"{_money(total)}: {listed}{more}."
+            )
+        else:
+            summary += " Ainda não tem pedidos registrados."
+        if len(matches) > 1:
+            summary += f" Outros {len(matches) - 1} cliente(s) também correspondem."
+
+    return {
+        "found": bool(matches),
+        "query": name,
+        "matches": matches,
+        "summary": summary,
+    }
 
 
 def get_ticket(ticket_id: str) -> dict[str, Any]:
@@ -255,7 +358,16 @@ def get_ticket(ticket_id: str) -> dict[str, Any]:
     ticket = _tickets.get(ticket_id)
     if ticket is None:
         return {"found": False, "ticket_id": ticket_id}
-    return {"found": True, "ticket": copy.deepcopy(ticket)}
+    status = _TICKET_STATUS_PT.get(ticket["status"], ticket["status"])
+    priority = _PRIORITY_PT.get(ticket["priority"], ticket["priority"])
+    summary = (
+        f"Chamado de {_customer_name(ticket['customer_id'])} sobre "
+        f"\"{ticket['subject']}\": está {status}, prioridade {priority}, "
+        f"aberto em {ticket['opened_on']}."
+    )
+    if ticket.get("resolution"):
+        summary += f" Resolução: {ticket['resolution']}"
+    return {"found": True, "ticket": copy.deepcopy(ticket), "summary": summary}
 
 
 def update_record(record_id: str, field: str, value: str) -> dict[str, Any]:
