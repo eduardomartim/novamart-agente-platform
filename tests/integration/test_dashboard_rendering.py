@@ -202,3 +202,108 @@ def test_out_of_scope_is_not_painted_like_a_denial(dashboard, state, expected_cl
     assert expected_class in markup, markup
     if state is execution_view.State.OUT_OF_SCOPE:
         assert "ap-deny" not in markup
+
+# ====================================================== the decision's own tool
+
+
+def _confirm_trace() -> list[dict]:
+    """A run where a read precedes the action that needs approval.
+
+    This is the ordinary shape of the executor route -- the researcher gathers
+    context first -- and it is the shape that exposed the bug.
+    """
+    return [
+        _started(),
+        {"sequence": 2, "event_type": "action_proposed",
+         "status": "info", "tool": "search"},
+        {"sequence": 3, "event_type": "policy_decision", "status": "success",
+         "tool": "search", "policy_decision": "allow"},
+        {"sequence": 4, "event_type": "tool_call", "status": "success",
+         "tool": "search"},
+        {"sequence": 5, "event_type": "action_proposed",
+         "status": "info", "tool": "update_record"},
+        {"sequence": 6, "event_type": "policy_decision", "status": "info",
+         "tool": "update_record", "policy_decision": "require_confirmation"},
+    ]
+
+
+def test_the_decision_and_its_tool_come_from_the_same_event():
+    """They used to be read from opposite ends of the trace.
+
+    `policy_decision` was the last decision; the tool shown beside it was
+    `tools[0]`, the first tool that ran. On a two-step run that put `search`
+    next to REQUIRE_CONFIRMATION while the panel below asked to approve
+    `update_record`.
+    """
+    view = execution_view.build(_confirm_trace(), status="awaiting_confirmation")
+
+    assert view.policy_decision == "require_confirmation"
+    assert view.decided_tool == "update_record", (
+        "the summary names a tool the decision was not about"
+    )
+    assert view.tools[0].name == "search", (
+        "the trace order changed; this test no longer covers the case it was "
+        "written for"
+    )
+
+
+def test_a_denial_names_the_tool_that_was_denied():
+    view = execution_view.build(
+        [
+            _started(),
+            {"sequence": 2, "event_type": "action_proposed",
+             "status": "info", "tool": "delete_record"},
+            {"sequence": 3, "event_type": "policy_decision", "status": "failure",
+             "tool": "delete_record", "policy_decision": "deny",
+             "rule_ids": ["PL005"]},
+        ],
+        status="blocked",
+    )
+    assert view.decided_tool == "delete_record"
+
+
+def test_a_single_step_run_is_unchanged():
+    """The common case must keep reporting what it always did."""
+    view = execution_view.build(
+        [
+            _started(),
+            {"sequence": 2, "event_type": "action_proposed",
+             "status": "info", "tool": "get_order"},
+            {"sequence": 3, "event_type": "policy_decision", "status": "success",
+             "tool": "get_order", "policy_decision": "allow"},
+            {"sequence": 4, "event_type": "tool_call", "status": "success",
+             "tool": "get_order"},
+        ],
+        status="success",
+    )
+    assert view.decided_tool == "get_order"
+    assert view.tools[0].name == "get_order"
+
+
+def test_a_run_with_no_policy_event_reports_no_decided_tool():
+    """Nothing was decided, so nothing is claimed."""
+    view = execution_view.build([_started()], status="declined")
+    assert view.decided_tool is None
+
+
+# ================================================ capabilities are not repeated
+
+
+def test_the_two_pages_split_the_capability_list_without_overlap(dashboard):
+    """Four cards used to appear word for word on both pages.
+
+    The split is one constant, so a capability added to the declared list still
+    lands on exactly one page -- decided by position, not by a second list.
+    """
+    import demo_content as demo
+
+    split = dashboard.OVERVIEW_CAPABILITIES
+    landing = [title for title, _ in demo.DEMONSTRATED[:split]]
+    architecture = [title for title, _ in demo.DEMONSTRATED[split:]]
+
+    assert landing, "the landing page shows no capabilities"
+    assert architecture, "the architecture page shows none"
+    assert not set(landing) & set(architecture), "a capability is shown twice"
+    assert len(landing) + len(architecture) == len(demo.DEMONSTRATED), (
+        "the split drops a declared capability"
+    )

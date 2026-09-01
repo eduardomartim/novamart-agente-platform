@@ -148,6 +148,23 @@ _STYLE = """
     letter-spacing: 0.06em; padding: 0.16rem 0.5rem; border-radius: 4px;
     border: 1px solid currentColor;
   }
+  /* Streamlit paints its warning pure yellow (hue 60) at 20% opacity, which
+     composites to an olive block beside this project's gold amber (hue 40) --
+     measured, not guessed: rgba(255,255,18,.2) against --ap-amber #D29922.
+     Only the *presentation* changes here; every `st.warning` call keeps its
+     meaning, and amber keeps meaning "stop and decide".
+
+     `stAlertContainer` and `stAlertContentWarning` are Streamlit-internal test
+     ids, so the rule is scoped as narrowly as the DOM allows and touches no
+     other alert kind. If either name changes in an upgrade this stops applying
+     and the default returns -- a silent fallback to a working control, which
+     is the right way for a cosmetic rule to fail. */
+  [data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {
+    background: rgba(210, 153, 34, 0.13);
+    border: 1px solid rgba(210, 153, 34, 0.42);
+    color: #EBD9AE;
+  }
+
   .ap-allow { color: var(--ap-green); }
   /* Not an outcome anyone should read as good or bad -- the platform simply
      had nothing to answer with. */
@@ -192,6 +209,11 @@ def get_platform() -> AgentPlatform:
     """One platform instance per Streamlit session."""
     return AgentPlatform(Settings.from_env())
 
+
+#: How many of the declared capabilities the landing page shows. The
+#: architecture page renders the rest, so the split lives in one place and the
+#: two pages cannot both claim -- or both drop -- the same card.
+OVERVIEW_CAPABILITIES = 4
 
 DEFAULT_HINT = "Popule o banco com `agent-platform demo`."
 
@@ -423,7 +445,7 @@ def page_overview(platform: AgentPlatform) -> None:
     )
 
     st.header("O que este projeto demonstra")
-    cards(list(demo.DEMONSTRATED[:4]), per_row=2)
+    cards(list(demo.DEMONSTRATED[:OVERVIEW_CAPABILITIES]), per_row=2)
     st.caption(
         "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
         "detalhados em **Arquitetura**."
@@ -576,7 +598,13 @@ def _result_summary(last: dict[str, Any], view: execution_view.ExecutionView) ->
         st.markdown(f"`{last.get('route') or '—'}`")
     with columns[2]:
         st.caption("FERRAMENTA")
-        tool = view.tools[0].name if view.tools else "—"
+        # The tool the decision beside it was about. `view.tools[0]` was the
+        # first tool in the trace, which on a multi-step run is not the one the
+        # policy decided on -- a confirmation showed `search` next to
+        # REQUIRE_CONFIRMATION while asking to approve `update_record`.
+        # Falls back to the last tool that ran when no policy event named one,
+        # so a trace with any number of tools still reports something true.
+        tool = view.decided_tool or (view.tools[-1].name if view.tools else "—")
         st.markdown(f"`{tool}`")
     with columns[3]:
         st.caption("TEMPO")
@@ -1100,12 +1128,17 @@ def page_architecture(platform: AgentPlatform) -> None:
         icon=":material/gavel:",
     )
 
-    # The full declared list. The landing page shows the first four; the two
-    # it leaves out -- RAG and MCP -- are named there on one line and get
-    # their description here, which is where a reader who wants it will be.
-    st.header("Competências demonstradas")
-    lede("A lista completa, incluindo as duas que a tela inicial só cita.")
-    cards(list(demo.DEMONSTRATED), per_row=2)
+    # Only what the landing page did not already show. Rendering the whole
+    # list here repeated four cards word for word for anyone who arrived from
+    # the first screen -- the same claims, twice, two clicks apart. The slice
+    # is taken from the same declared source, so the two pages cannot drift:
+    # adding a capability to `DEMONSTRATED` still puts it on exactly one of
+    # them, decided by its position rather than by a second list.
+    remaining = list(demo.DEMONSTRATED[OVERVIEW_CAPABILITIES:])
+    if remaining:
+        st.header("Também demonstrado")
+        lede("O que a tela inicial cita sem descrever.")
+        cards(remaining, per_row=2)
 
 
 # ========================================================= 6. Observabilidade

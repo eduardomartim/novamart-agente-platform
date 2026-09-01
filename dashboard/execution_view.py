@@ -87,6 +87,13 @@ class ExecutionView:
     agents: tuple[AgentActivity, ...]
     tools: tuple[ToolActivity, ...]
     policy_decision: str | None
+    #: The tool ``policy_decision`` was about. They are read from the same
+    #: event, because reading them separately is how the summary came to show
+    #: `search` beside REQUIRE_CONFIRMATION while the panel below it asked
+    #: about `update_record`: the decision was taken from the last policy event
+    #: and the tool from the first tool call, which are opposite ends of a
+    #: multi-step trace.
+    decided_tool: str | None
     policy_rules: str | None
     outcome: State
     blocked_by: str | None
@@ -350,10 +357,14 @@ def build(events: list[dict[str, Any]], *, status: str) -> ExecutionView:
     ordered = sorted(events, key=lambda e: int(e.get("sequence") or 0))
 
     decision = None
+    decided_tool = None
     rules = None
     for event in ordered:
         if event.get("event_type") == "policy_decision" and event.get("policy_decision"):
             decision = event["policy_decision"]
+            # Same event, same loop, same iteration. Whatever rule decides
+            # which decision is *the* decision, the tool follows it.
+            decided_tool = event.get("tool") or None
             raw = event.get("rule_ids")
             if raw:
                 rules = raw if isinstance(raw, str) else ", ".join(raw)
@@ -366,6 +377,7 @@ def build(events: list[dict[str, Any]], *, status: str) -> ExecutionView:
         agents=_agent_states(ordered),
         tools=_tool_activity(ordered),
         policy_decision=decision,
+        decided_tool=decided_tool,
         policy_rules=rules,
         outcome=_outcome(
             status,
