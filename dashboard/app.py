@@ -18,6 +18,7 @@ repository or the simulated dataset rather than written down as a claim.
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -262,22 +263,50 @@ def mode_banner(platform: AgentPlatform) -> None:
     model -- but unmissable is a job for placement, not for area.
     """
     info = platform.provider_info
+    # No badge here. The sidebar carries one permanently, and showing the same
+    # DEMO / STUB pill twice on the first screen spent the reader's attention
+    # on a repetition. This keeps the sentence, which is the part that says
+    # something the badge cannot.
     if info.live:
-        badge, text = (
-            '<span class="ap-pill ap-allow">LIVE</span>',
-            f"As requisições são processadas pelo provedor configurado "
-            f"(<code>{info.model}</code>).",
+        text = (
+            f"<strong>Modo live.</strong> As requisições são processadas pelo "
+            f"provedor configurado (<code>{info.model}</code>)."
         )
     else:
-        badge, text = (
-            '<span class="ap-pill ap-hold">DEMO / STUB</span>',
-            "Simulação local determinística. Nenhum provedor de IA externo "
-            "está sendo chamado, e nada aqui é atribuído a um.",
+        text = (
+            "<strong>Simulação local determinística.</strong> Nenhum provedor "
+            "de IA externo está sendo chamado, e nada aqui é atribuído a um."
         )
-    st.markdown(
-        f'<div class="ap-mode">{badge}<span>{text}</span></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="ap-mode"><span>{text}</span></div>',
+                unsafe_allow_html=True)
+
+
+def provider_calls_recorded(platform: AgentPlatform) -> int | None:
+    """Physical calls to a real provider, counted from the ledger itself.
+
+    Not the same number as `metrics_summary()["llm_calls"]`, which counts every
+    model call including the stub's. This reads the provider-call ledger, which
+    is incremented once per *physical* attempt immediately before the SDK call
+    and never for the stub -- so a non-zero value here is evidence that the live
+    path was actually exercised, not a claim that it exists.
+
+    `None` when there is no ledger yet, so the strip can stay silent rather than
+    report a zero it has not earned.
+    """
+    path = Path(platform.settings.database_path).parent / "provider_budget.db"
+    if not path.is_file():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = connection.execute("SELECT SUM(calls) FROM provider_budget").fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        connection.close()
+    return int(row[0]) if row and row[0] else 0
 
 
 def live_call_count(platform: AgentPlatform) -> int:
@@ -374,14 +403,6 @@ def page_overview(platform: AgentPlatform) -> None:
         "propõem, e o Policy Engine decide."
     )
 
-    # --- four capabilities, from the declared list --------------------------
-    st.header("O que este projeto demonstra")
-    cards(list(demo.DEMONSTRATED[:4]), per_row=2)
-    st.caption(
-        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
-        "detalhados em **Arquitetura**."
-    )
-
     # --- the one call to action --------------------------------------------
     st.header("Experimente")
     starter = demo.READ_ONLY_EXAMPLES[0][0]
@@ -401,20 +422,40 @@ def page_overview(platform: AgentPlatform) -> None:
         "conjunto de dados usam — é literalmente o texto que entra no sistema."
     )
 
+    st.header("O que este projeto demonstra")
+    cards(list(demo.DEMONSTRATED[:4]), per_row=2)
+    st.caption(
+        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
+        "detalhados em **Arquitetura**."
+    )
+
     # --- what holds it up ---------------------------------------------------
     st.header("O que sustenta isso")
-    guarantees(
-        [
-            ("Política", "11 regras decidem antes de qualquer execução."),
-            ("Autenticação", "A API recusa com 401 sem credencial."),
-            ("Auditoria", "Cada requisição tem id, passos e decisão gravados."),
+    rows = [
+        ("Política", "11 regras decidem antes de qualquer execução."),
+        ("Autenticação", "A API recusa com 401 sem credencial."),
+        ("Auditoria", "Cada requisição tem id, passos e decisão gravados."),
+        (
+            "Custo",
+            f"Limite de {demo_budget.LIVE_CALL_BUDGET} chamadas por dia ao "
+            "provedor, aplicado em modo live.",
+        ),
+    ]
+    # The live path was invisible: the interface said the mode exists and gave
+    # a reader no way to tell whether it had ever run. This is the physical
+    # ledger, incremented once per real provider call and never by the stub --
+    # evidence, not a claim. Absent when there is nothing to show, rather than
+    # a zero dressed up as a fact.
+    calls = provider_calls_recorded(platform)
+    if calls:
+        rows.append(
             (
-                "Custo",
-                f"Limite de {demo_budget.LIVE_CALL_BUDGET} chamadas por dia ao "
-                "provedor, aplicado em modo live.",
-            ),
-        ]
-    )
+                "Provedor real",
+                f"{calls} chamadas ao Gemini já registradas no ledger físico "
+                "desta instalação.",
+            )
+        )
+    guarantees(rows)
 
     # --- and what is not there ----------------------------------------------
     st.header("O que não foi construído")
@@ -808,11 +849,15 @@ def _result_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
     )
     _result_summary(last, view)
 
-    st.markdown("**Resposta**")
-    st.markdown(as_prose(last["response"] or ""))
-
     if last["pending"]:
+        # The platform's own sentence here says the action needs approval, in
+        # English, immediately above a Portuguese panel saying the same thing
+        # and offering the buttons. Two messages, one fact. The panel wins: it
+        # is the one that can be acted on.
         _confirmation_panel(platform, last)
+    else:
+        st.markdown("**Resposta**")
+        st.markdown(as_prose(last["response"] or ""))
 
     if view.outcome is execution_view.State.OUT_OF_SCOPE:
         st.info(
