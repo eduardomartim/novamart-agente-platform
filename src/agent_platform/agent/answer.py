@@ -154,14 +154,34 @@ class Answer:
 # --------------------------------------------------------------- constructors
 
 
+#: What a visitor sees when the search ran and found nothing that answers them.
+#:
+#: It used to read "I could not find enough information in the available
+#: documents to answer that." Two problems with that sentence, both found by
+#: asking the live model about stock levels: it was in English while the rest
+#: of the interface is Portuguese, and "documents" describes how the platform
+#: looked rather than what the reader asked about. Someone asking whether
+#: products are running low is not told anything useful by learning that a
+#: document search came back empty.
+#:
+#: So it names the two things that are true and useful instead: what the
+#: knowledge base covers, and what the platform can be asked about directly.
+#: A reader whose question is outside both -- stock being the obvious case --
+#: can see that from the answer without the platform having to guess which
+#: subject they meant, and without inventing a figure it does not hold.
+NO_EVIDENCE_TEXT = (
+    "Não encontrei essa informação nesta demonstração. A base de conhecimento "
+    "cobre políticas e processos de atendimento — reembolso, prazos de envio, "
+    "garantia, devoluções, faturas e afins — e não guarda dados operacionais "
+    "como níveis de estoque. Posso consultar clientes, pedidos e tickets, "
+    "inclusive totais e rankings."
+)
+
+
 def insufficient_evidence(reason: str, *, text: str | None = None, **metadata: Any) -> Answer:
     """The documents do not answer the question. A result, not an error."""
     return Answer(
-        text=text
-        or (
-            "I could not find enough information in the available documents to "
-            "answer that."
-        ),
+        text=text or NO_EVIDENCE_TEXT,
         outcome=AnswerOutcome.INSUFFICIENT_EVIDENCE,
         reason=reason,
         metadata=dict(metadata),

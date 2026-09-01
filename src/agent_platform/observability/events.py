@@ -38,6 +38,17 @@ class EventType(StrEnum):
     #: to a provider. Carries category names only, never values.
     PROMPT_REDACTED = "prompt_redacted"
     LLM_CALL = "llm_call"
+    #: One physical attempt that failed and was retried inside the provider.
+    #: Additive: a provider that never retries emits none of these, and LLM_CALL
+    #: keeps meaning exactly what it meant -- the call that eventually returned.
+    #: Without it a call that lost thirty seconds to 503s and then succeeded was
+    #: recorded as the successful attempt alone, and a call that failed outright
+    #: was recorded as nothing at all.
+    LLM_RETRY = "llm_retry"
+    #: Every attempt failed and the provider gave up. Distinct from LLM_RETRY,
+    #: which is one attempt among several, and from CIRCUIT_OPEN, where no call
+    #: was made at all.
+    LLM_FAILED = "llm_failed"
     ACTION_PROPOSED = "action_proposed"
     POLICY_DECISION = "policy_decision"
     CONFIRMATION_REQUESTED = "confirmation_requested"

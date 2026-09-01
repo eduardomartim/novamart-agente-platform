@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_platform.agent.answer import AnswerOutcome
+from agent_platform.agent.answer import NO_EVIDENCE_TEXT, AnswerOutcome
 from agent_platform.config import Settings
 from agent_platform.llm.provider import Purpose
 from agent_platform.llm.stub import StubProvider
@@ -26,8 +26,11 @@ from agent_platform.tools.dataset import dataset_digest
 
 DIGEST = "db512de8207f751e"
 
-#: The sentence that must never appear in reply to a lookup that succeeded.
-DENIAL = "could not find enough information"
+#: The opening of the sentence that must never appear in reply to a lookup that
+#: succeeded. Taken from the source rather than retyped, so the day the wording
+#: changes this test follows it instead of quietly checking for a string nobody
+#: produces. Lower-cased because every comparison below lower-cases the reply.
+DENIAL = NO_EVIDENCE_TEXT[:40].lower()
 
 
 @pytest.fixture

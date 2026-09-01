@@ -99,9 +99,34 @@ class LLMResponse:
     #: True when token counts are approximations rather than provider-reported.
     tokens_estimated: bool = False
 
+    # --- what it took to get this answer -----------------------------------
+    #
+    # ``latency_ms`` above is the *successful* attempt. When a provider retries
+    # internally, everything before the attempt that worked -- the failures and
+    # the backoff between them -- is not in that number and used to be in no
+    # number at all: a call that spent thirty-six seconds losing to 503s and
+    # then succeeded in eight hundred milliseconds was recorded as eight
+    # hundred milliseconds. The three fields below carry the rest of the story
+    # so the agent can record it.
+    #
+    # All three have defaults, so every existing construction keeps working and
+    # a provider that never retries reports the truth by saying nothing.
+
+    #: Physical attempts made, including the one that succeeded. 1 means no retry.
+    attempts: int = 1
+    #: Wall-clock across every attempt and every backoff, not just the last try.
+    total_elapsed_ms: float = 0.0
+    #: Why each failed attempt failed, oldest first, already scrubbed by the
+    #: provider. Never carries a credential: see ``GeminiProvider._scrub``.
+    retry_reasons: tuple[str, ...] = ()
+
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    @property
+    def retried(self) -> bool:
+        return self.attempts > 1
 
 
 @dataclass(frozen=True, slots=True)

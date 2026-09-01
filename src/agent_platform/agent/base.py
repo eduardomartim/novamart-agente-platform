@@ -338,19 +338,23 @@ class BaseAgent(ABC):
                 temperature=0.0,
                 timeout=self.deps.settings.llm_timeout,
             )
-        except LLMError:
+        except LLMError as exc:
             if self.deps.circuit is not None:
                 self.deps.circuit.record_failure()
+            self._record_llm_failure(purpose, exc)
             raise
         except Exception as exc:
             if self.deps.circuit is not None:
                 self.deps.circuit.record_failure()
+            self._record_llm_failure(purpose, exc)
             raise LLMUnavailableError(
                 f"provider raised an unexpected {type(exc).__name__}: {exc}"
             ) from exc
 
         if self.deps.circuit is not None:
             self.deps.circuit.record_success()
+
+        self._record_retries(purpose, response)
 
         tracked = self.deps.cost_tracker.track(
             response,
@@ -375,9 +379,65 @@ class BaseAgent(ABC):
                 "output_tokens": response.output_tokens,
                 "estimated_cost_usd": str(tracked.cost_usd),
                 "tokens_estimated": response.tokens_estimated,
+                # Present only when it says something. `latency_ms` above is the
+                # attempt that worked; these two are what the caller waited.
+                **(
+                    {
+                        "attempts": response.attempts,
+                        "total_elapsed_ms": round(response.total_elapsed_ms, 3),
+                    }
+                    if response.retried
+                    else {}
+                ),
             },
         )
         return response
+
+    def _record_retries(self, purpose: Purpose, response: LLMResponse) -> None:
+        """One event per attempt the provider lost before the one that worked.
+
+        The provider retries internally and reports how many times; it has no
+        tracer and is not given one, because a client that writes to the event
+        stream is a client that knows about the platform. It reports, this
+        records -- which keeps the boundary and still makes the time visible.
+
+        ``retry_reasons`` has already been through the provider's scrubber, so
+        the configured credential cannot appear here even when the SDK echoes
+        the request back in an error.
+        """
+        if not response.retried:
+            return
+        reasons = response.retry_reasons or ()
+        for index in range(1, response.attempts):
+            self.deps.tracer.event(
+                EventType.LLM_RETRY,
+                status=EventStatus.FAILURE,
+                agent=self.name,
+                error=reasons[index - 1] if index <= len(reasons) else None,
+                payload={
+                    "purpose": purpose.value,
+                    "attempt": index,
+                    "of": response.attempts,
+                    "provider": response.provider,
+                    "model": response.model,
+                },
+            )
+
+    def _record_llm_failure(self, purpose: Purpose, exc: BaseException) -> None:
+        """Every attempt failed. Previously this left nothing in the trace.
+
+        The physical calls were still charged to the ledger, so a request could
+        spend six calls and show `llm_calls: 0` -- the accounting and the trace
+        disagreeing about the same event. The message is the provider's own,
+        already scrubbed by it before being raised.
+        """
+        self.deps.tracer.event(
+            EventType.LLM_FAILED,
+            status=EventStatus.FAILURE,
+            agent=self.name,
+            error=str(exc)[:300],
+            payload={"purpose": purpose.value, "error_type": type(exc).__name__},
+        )
 
     def generate_text(self, prompt: str, *, purpose: Purpose) -> tuple[str, LLMResponse]:
         response = self._generate(prompt, purpose=purpose)

@@ -20,7 +20,7 @@ import dataclasses
 
 import pytest
 
-from agent_platform.agent.answer import AnswerOutcome
+from agent_platform.agent.answer import NO_EVIDENCE_TEXT, AnswerOutcome
 from agent_platform.config import Settings
 from agent_platform.llm.provider import Purpose
 from agent_platform.llm.stub import StubProvider
@@ -113,8 +113,8 @@ def test_a_failing_search_is_not_reported_as_missing_information(
 
     assert event.payload["outcome"] != AnswerOutcome.INSUFFICIENT_EVIDENCE.value
     lowered = (result.response or "").lower()
-    assert "could not find enough information" not in lowered
-    assert "available documents" not in lowered
+    assert NO_EVIDENCE_TEXT[:40].lower() not in lowered
+    assert "não encontrei essa informação" not in lowered
 
 
 def test_a_failing_search_does_not_report_success(settings, broken_search):
@@ -174,7 +174,7 @@ def test_an_empty_result_still_reports_success(settings):
     """Finding nothing is a correct outcome, not a failed request."""
     result, _events = run(settings, "How do I reset my password?")
     assert result.status == "success"
-    assert "could not find enough information" in (result.response or "").lower()
+    assert NO_EVIDENCE_TEXT[:40].lower() in (result.response or "").lower()
 
 
 def test_the_answerer_is_not_consulted_for_an_empty_result_either(settings):

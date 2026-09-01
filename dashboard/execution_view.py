@@ -98,6 +98,10 @@ _STEP_LABELS: dict[str, str] = {
     "route_selected": "Roteador classificou a requisição",
     "agent_started": "Agente iniciou",
     "action_proposed": "Ação proposta",
+    #: A physical attempt the provider lost. Shown because a request that took
+    #: thirty seconds and one that took one look identical without it.
+    "llm_retry": "Tentativa ao provedor falhou, repetindo",
+    "llm_failed": "Provedor falhou em todas as tentativas",
     "policy_decision": "Motor de políticas decidiu",
     "confirmation_requested": "Aguardando aprovação humana",
     "confirmation_resolved": "Decisão humana registrada",

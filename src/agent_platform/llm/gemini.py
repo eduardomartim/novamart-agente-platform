@@ -250,6 +250,11 @@ class GeminiProvider:
         timeout: float | None = None,
     ) -> LLMResponse:
         last_error: Exception | None = None
+        # Outside the loop on purpose. `started` below is reset per attempt
+        # and measures the try that worked; this one measures what the caller
+        # actually waited, backoff included.
+        call_started = time.perf_counter()
+        failures: list[str] = []
 
         for attempt in range(1, self._retry.max_attempts + 1):
             config = self._build_config(
@@ -290,6 +295,7 @@ class GeminiProvider:
                     # per provider instance.
                     self._thinking_supported = False
                     last_error = exc
+                    failures.append(self._scrub(exc))
                     continue
                 # Every other 4xx -- quota, permissions, a named bad key, or a
                 # 400 that says what was wrong. Retrying cannot help and would
@@ -299,10 +305,13 @@ class GeminiProvider:
                 ) from exc
             except genai_errors.ServerError as exc:
                 last_error = exc
+                failures.append(self._scrub(exc))
             except TimeoutError as exc:
                 last_error = exc
+                failures.append(self._scrub(exc))
             except Exception as exc:
                 last_error = exc
+                failures.append(self._scrub(exc))
             else:
                 elapsed_ms = (time.perf_counter() - started) * 1000.0
                 text = response.text or ""
@@ -326,6 +335,9 @@ class GeminiProvider:
                     latency_ms=elapsed_ms,
                     finish_reason=finish or None,
                     tokens_estimated=estimated,
+                    attempts=attempt,
+                    total_elapsed_ms=(time.perf_counter() - call_started) * 1000.0,
+                    retry_reasons=tuple(failures),
                 )
 
             if attempt < self._retry.max_attempts:
