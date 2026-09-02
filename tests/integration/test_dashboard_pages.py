@@ -28,12 +28,12 @@ from streamlit.testing.v1 import AppTest
 APP = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
 
 PAGES = [
-    "Visão geral",
-    "Empresa",
-    "Orquestrador",
-    "Segurança",
-    "Arquitetura",
-    "Observabilidade",
+    "overview",
+    "company",
+    "orchestrator",
+    "security",
+    "architecture",
+    "observability",
 ]
 
 #: Streamlit reruns the whole script per interaction, and this app seeds nothing
@@ -60,7 +60,7 @@ def _run(db_path: Path, page: str) -> AppTest:
     app = AppTest.from_file(str(APP), default_timeout=TIMEOUT)
     app.run()
     if page != PAGES[0]:
-        app.radio[0].set_value(page).run()
+        app.radio(key="nav_pt").set_value(page).run()
     return app
 
 
@@ -139,10 +139,10 @@ def test_every_page_renders_with_seeded_data(page, seeded_db):
 def test_data_pages_explain_themselves_when_empty(page, empty_db):
     """No page may render an unexplained blank.
 
-    "Orquestrador" is exempt: it is a form, so an empty database is its
+    "orchestrator" is exempt: it is a form, so an empty database is its
     normal resting state and the form itself is the content.
     """
-    if page == "Orquestrador":
+    if page == "orchestrator":
         pytest.skip("a form is not an empty state")
     app = _run(empty_db, page)
     body = " ".join(
@@ -160,7 +160,7 @@ def test_an_empty_page_names_the_command_that_actually_fills_it(empty_db):
     exists: Observabilidade is populated by traffic, and ``agent-platform demo``
     is what produces traffic -- so here that hint is the correct one.
     """
-    app = _run(empty_db, "Observabilidade")
+    app = _run(empty_db, "observability")
     joined = " ".join(el.value for el in app.info)
     assert "agent-platform demo" in joined, (
         "the empty state must name the command that populates this page"
@@ -189,11 +189,11 @@ def test_pages_are_isolated_from_a_previously_loaded_database(seeded_db, empty_d
     and the empty-state assertions pass or fail depending purely on the order
     tests happened to run in.
     """
-    seeded = _run(seeded_db, "Observabilidade")
+    seeded = _run(seeded_db, "observability")
     seeded_body = " ".join(el.value for el in seeded.metric)
     assert seeded_body.strip(), "the seeded database rendered no metrics"
 
-    empty = _run(empty_db, "Observabilidade")
+    empty = _run(empty_db, "observability")
     empty_body = " ".join(
         [el.value for el in empty.info] + [el.value for el in empty.markdown]
     )

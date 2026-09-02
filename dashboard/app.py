@@ -34,11 +34,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import demo_budget
 import demo_content as demo
 import execution_view
+from i18n import (
+    DEFAULT_LOCALE,
+    LOCALE_KEY,
+    LOCALE_LABELS,
+    LOCALES,
+    current_locale,
+    t,
+)
 
 from agent_platform.config import Settings
 from agent_platform.cost.pricing import pricing_notice
 from agent_platform.guardrails.authorization import describe_matrix
 from agent_platform.guardrails.rules import describe_rules
+from agent_platform.i18n import use_locale
 from agent_platform.llm.authorization import LiveNotAuthorised
 from agent_platform.observability.metrics import collect_metrics
 from agent_platform.platform import AgentPlatform
@@ -312,16 +321,11 @@ def mode_banner(platform: AgentPlatform) -> None:
     # DEMO / STUB pill twice on the first screen spent the reader's attention
     # on a repetition. This keeps the sentence, which is the part that says
     # something the badge cannot.
-    if info.live:
-        text = (
-            f"<strong>Modo live.</strong> As requisições são processadas pelo "
-            f"provedor configurado (<code>{info.model}</code>)."
-        )
-    else:
-        text = (
-            "<strong>Simulação local determinística.</strong> Nenhum provedor "
-            "de IA externo está sendo chamado, e nada aqui é atribuído a um."
-        )
+    text = (
+        t("mode.live_banner", model=info.model)
+        if info.live
+        else t("mode.stub_banner")
+    )
     st.markdown(f'<div class="ap-mode"><span>{text}</span></div>',
                 unsafe_allow_html=True)
 
@@ -389,7 +393,7 @@ def as_prose(text: str) -> str:
 
 
 def goto(page: str, question: str | None = None) -> None:
-    """Queue a navigation for the next rerun.
+    """Queue a navigation for the next rerun. *page* is a slug, not a label.
 
     Writes state and returns. It deliberately does not call ``st.rerun()``:
     a rerun raised from inside a tab or an expander tears down a subtree that
@@ -420,71 +424,60 @@ def page_overview(platform: AgentPlatform) -> None:
     # The whole product in one sentence, in the order a reader needs it:
     # who acts, over what, and who is allowed to stop them.
     lede(
-        "A NovaMart usa agentes de IA especializados para consultar clientes, "
-        "pedidos e suporte. Um orquestrador decide quais agentes entram em "
-        "ação, e um <strong>Policy Engine</strong> bloqueia operações de "
-        "risco antes que "
-        "qualquer ferramenta rode."
+        t("overview.lede")
     )
     st.write("")
     mode_banner(platform)
 
     # --- the path a request takes ------------------------------------------
-    st.header("Como funciona")
+    st.header(t("overview.how_it_works"))
     flow(
         [
-            "Usuário",
-            "Router",
-            "Agente especializado",
-            "Policy Engine",
-            "Ferramenta",
+            t("flow.user"),
+            t("flow.router"),
+            t("flow.agent"),
+            t("flow.policy"),
+            t("flow.tool"),
             "Validador",
             "Resposta",
         ],
         gate="Policy Engine",
     )
     lede(
-        "O mesmo caminho toda vez. Nenhum agente executa uma ferramenta: eles "
-        "propõem, e o Policy Engine decide."
+        t("overview.same_path")
     )
 
     # --- the one call to action --------------------------------------------
-    st.header("Experimente")
+    st.header(t("overview.try_it"))
     starter = demo.READ_ONLY_EXAMPLES[0][0]
-    lede("Uma pergunta em linguagem natural, e a decisão que o sistema tomou.")
+    lede(t("overview.try_lede"))
     columns = st.columns([6, 2])
     columns[0].code(starter, language="text", wrap_lines=True)
     columns[1].button(
-        "Executar esta pergunta",
+        t("overview.run_this"),
         key="cta_try",
         type="primary",
         width="stretch",
         on_click=goto,
-        args=("Orquestrador", starter),
+        args=("orchestrator", starter),
     )
     st.caption(
-        "As perguntas estão em inglês porque é o idioma que o roteador e o "
-        "conjunto de dados usam — é literalmente o texto que entra no sistema."
+        t("overview.why_english")
     )
 
-    st.header("O que este projeto demonstra")
+    st.header(t("overview.demonstrates"))
     cards(list(demo.DEMONSTRATED[:OVERVIEW_CAPABILITIES]), per_row=2)
     st.caption(
-        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
-        "detalhados em **Arquitetura**."
+        t("overview.stack_note")
     )
 
     # --- what holds it up ---------------------------------------------------
-    st.header("O que sustenta isso")
+    st.header(t("overview.what_holds"))
     rows = [
-        ("Política", "11 regras decidem antes de qualquer execução."),
-        ("Autenticação", "A API recusa com 401 sem credencial."),
-        ("Auditoria", "Cada requisição tem id, passos e decisão gravados."),
-        (
-            "Custo",
-            f"Limite de {demo_budget.LIVE_CALL_BUDGET} chamadas por dia ao "
-            "provedor, aplicado em modo live.",
-        ),
+        (t("holds.policy"), t("holds.policy_body")),
+        (t("holds.auth"), t("holds.auth_body")),
+        (t("holds.audit"), t("holds.audit_body")),
+        (t("holds.cost"), t("holds.cost_body", budget=demo_budget.LIVE_CALL_BUDGET)),
     ]
     # The live path was invisible: the interface said the mode exists and gave
     # a reader no way to tell whether it had ever run. This is the physical
@@ -494,19 +487,14 @@ def page_overview(platform: AgentPlatform) -> None:
     calls = provider_calls_recorded(platform)
     if calls:
         rows.append(
-            (
-                "Provedor real",
-                f"{calls} chamadas ao Gemini já registradas no ledger físico "
-                "desta instalação.",
-            )
+            (t("holds.real_provider"), t("holds.real_provider_body", calls=calls))
         )
     guarantees(rows)
 
     # --- and what is not there ----------------------------------------------
-    st.header("O que não foi construído")
+    st.header(t("overview.not_built"))
     lede(
-        "As limitações ficam na mesma tela que as afirmações. Um projeto que "
-        "só lista o que faz bem não é verificável."
+        t("overview.not_built_lede")
     )
     # The same strip as the guarantees above, on purpose: what is built and
     # what is not are the same kind of claim and deserve the same weight. As
@@ -515,10 +503,10 @@ def page_overview(platform: AgentPlatform) -> None:
 
     st.write("")
     st.button(
-        "Ver a arquitetura",
+        t("overview.see_architecture"),
         key="cta_arch",
         on_click=goto,
-        args=("Arquitetura",),
+        args=("architecture",),
     )
 
 
@@ -528,7 +516,7 @@ def page_overview(platform: AgentPlatform) -> None:
 def _table(rows: list[dict[str, Any]], preview: int, key: str) -> None:
     """Show a readable slice, with the rest one disclosure away."""
     if not rows:
-        no_data("Sem registros para exibir.", hint=None)
+        no_data(t("table.no_rows"), hint=None)
         return
     st.dataframe(rows[:preview], width="stretch", hide_index=True)
     if len(rows) > preview:
@@ -537,23 +525,21 @@ def _table(rows: list[dict[str, Any]], preview: int, key: str) -> None:
 
 
 def page_company(platform: AgentPlatform) -> None:
-    eyebrow("Contexto da demonstração")
+    eyebrow(t("company.eyebrow"))
     st.title(demo.COMPANY_NAME)
     lede(
-        "Empresa fictícia de varejo e e-commerce. Ambiente simulado usado para "
-        "demonstrar como agentes de IA podem consultar clientes, pedidos, "
-        "produtos e tickets e executar ações protegidas por políticas."
+        t("company.lede")
     )
 
     totals = demo.company_totals()
     st.write("")
     metrics = st.columns(4)
-    metrics[0].metric("Clientes", totals["Customers"])
-    metrics[1].metric("Pedidos", totals["Orders"])
-    metrics[2].metric("Produtos", totals["Products"])
-    metrics[3].metric("Tickets abertos", totals["Open tickets"])
+    metrics[0].metric(t("company.customers"), totals["Customers"])
+    metrics[1].metric(t("company.orders"), totals["Orders"])
+    metrics[2].metric(t("company.products"), totals["Products"])
+    metrics[3].metric(t("company.open_tickets"), totals["Open tickets"])
 
-    st.header("Os dados")
+    st.header(t("company.the_data"))
     customers, orders, products, tickets = st.tabs(
         ["Clientes", "Pedidos", "Produtos", "Tickets"]
     )
@@ -566,21 +552,20 @@ def page_company(platform: AgentPlatform) -> None:
     with tickets:
         _table(demo.tickets_table(), 6, "tickets")
 
-    st.header("O que você pode testar")
+    st.header(t("company.what_you_can_test"))
     lede(
-        "Os identificadores acima são reais dentro da simulação. Use-os nas "
-        "perguntas — o sistema responde sobre eles."
+        t("company.ids_are_real")
     )
     for index, (question, hint) in enumerate(demo.READ_ONLY_EXAMPLES[:3]):
         columns = st.columns([6, 2])
         columns[0].code(question, language="text", wrap_lines=True)
         columns[0].caption(hint)
         columns[1].button(
-            "Perguntar",
+            t("company.ask"),
             key=f"company_ask_{index}",
             width="stretch",
             on_click=goto,
-            args=("Orquestrador", question),
+            args=("orchestrator", question),
         )
 
 
@@ -609,18 +594,18 @@ def _outcome_pill(state: execution_view.State) -> str:
 
 def _result_summary(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
     """Four facts, in the order a reader asks for them."""
-    st.markdown("**Pergunta**")
+    st.markdown(t("result.question_label"))
     st.code(last["question"], language="text", wrap_lines=True)
 
     columns = st.columns(4)
     with columns[0]:
-        st.caption("DECISÃO")
+        st.caption(t("result.decision"))
         st.markdown(_decision_pill(view.policy_decision), unsafe_allow_html=True)
     with columns[1]:
-        st.caption("AGENTE")
+        st.caption(t("result.agent"))
         st.markdown(f"`{last.get('route') or '—'}`")
     with columns[2]:
-        st.caption("FERRAMENTA")
+        st.caption(t("result.tool"))
         # The tool the decision beside it was about. `view.tools[0]` was the
         # first tool in the trace, which on a multi-step run is not the one the
         # policy decided on -- a confirmation showed `search` next to
@@ -630,7 +615,7 @@ def _result_summary(last: dict[str, Any], view: execution_view.ExecutionView) ->
         tool = view.decided_tool or (view.tools[-1].name if view.tools else "—")
         st.markdown(f"`{tool}`")
     with columns[3]:
-        st.caption("TEMPO")
+        st.caption(t("result.time"))
         st.markdown(f"**{last['latency_ms'] / 1000:.2f}s**")
 
 
@@ -662,11 +647,11 @@ def _timeline(view: execution_view.ExecutionView) -> None:
 
 
 def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
-    with st.expander("Ver detalhes técnicos"):
-        st.caption("Correlation ID")
+    with st.expander(t("tech.see_details")):
+        st.caption(t("tech.correlation_id"))
         st.code(last["request_id"], language="text", wrap_lines=True)
 
-        st.caption("Decisão de política")
+        st.caption(t("tech.policy_decision"))
         st.markdown(
             f"{_decision_pill(view.policy_decision)} &nbsp; "
             f"regras: `{view.policy_rules or '—'}`",
@@ -674,15 +659,15 @@ def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView)
         )
 
         if view.tools:
-            st.caption("Ferramentas")
+            st.caption(t("tech.tools"))
             st.dataframe(
                 [
                     {
-                        "Ferramenta": tool.name,
-                        "Risco": tool.risk or "—",
-                        "Proposta por": tool.proposed_by or "—",
-                        "Decisão": tool.decision or "—",
-                        "Execução": str(tool.execution),
+                        t("tools.name"): tool.name,
+                        t("tools.risk"): tool.risk or "—",
+                        t("tools.proposed_by"): tool.proposed_by or "—",
+                        t("tools.decision"): tool.decision or "—",
+                        t("tools.execution"): str(tool.execution),
                     }
                     for tool in view.tools
                 ],
@@ -690,7 +675,7 @@ def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView)
                 hide_index=True,
             )
 
-        st.caption("Agentes")
+        st.caption(t("tech.agents"))
         st.dataframe(
             [
                 {"Agente": a.name, "Estado": str(a.state), "Detalhe": a.detail or "—"}
@@ -700,7 +685,7 @@ def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView)
             hide_index=True,
         )
 
-        st.caption("Sequência completa de eventos")
+        st.caption(t("tech.full_event_sequence"))
         st.dataframe(
             [
                 {
@@ -717,8 +702,7 @@ def _technical_details(last: dict[str, Any], view: execution_view.ExecutionView)
             hide_index=True,
         )
         st.caption(
-            f"Chamadas de modelo nesta requisição: "
-            f"{execution_view.model_calls(last['events'])}"
+            t("result.model_calls", n=execution_view.model_calls(last["events"]))
         )
 
 
@@ -732,9 +716,10 @@ def _resolve(platform: AgentPlatform, approved: bool) -> None:
     last = st.session_state.get("last_result")
     if not last or not last.get("pending"):
         return
-    resumed = platform.confirm(
-        last["request_id"], approved=approved, actor="dashboard-user", source="ui"
-    )
+    with use_locale(current_locale()):
+        resumed = platform.confirm(
+            last["request_id"], approved=approved, actor="dashboard-user", source="ui"
+        )
     st.session_state["last_result"] = {
         **last,
         "status": resumed.status,
@@ -748,29 +733,33 @@ def _confirmation_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
     """The human-in-the-loop control, not a description of one."""
     pending = last["pending"]
     st.warning(
-        f"**Um humano precisa aprovar isto.** O executor propôs "
-        f"`{pending['tool']}` (risco {pending['risk_level']}). Nada foi "
-        "executado — a requisição está suspensa até você decidir."
+        t("confirm.needs_human", tool=pending["tool"], risk=pending["risk_level"])
     )
     st.caption(
-        "O que você aprova fica preso a estes argumentos exatos: uma "
-        "confirmação não pode ser reaproveitada para outra ação."
+        t("confirm.bound_to_args")
     )
     st.json(pending.get("arguments") or {})
     decide = st.columns([1, 1, 4])
     decide[0].button(
-        "Aprovar", key="confirm_approve", type="primary", width="stretch",
+        t("confirm.approve"), key="confirm_approve", type="primary", width="stretch",
         on_click=_resolve, args=(platform, True),
     )
     decide[1].button(
-        "Recusar", key="confirm_decline", width="stretch",
+        t("confirm.decline"), key="confirm_decline", width="stretch",
         on_click=_resolve, args=(platform, False),
     )
 
 
 def _run_question(platform: AgentPlatform, question: str) -> None:
-    """Run one request and keep everything the result pages need."""
-    result = platform.run(question)
+    """Run one request and keep everything the result pages need.
+
+    The locale travels with the call. The sentence a visitor reads is written
+    by the tool, not by this page, so an English interface that ran the
+    platform without saying so would answer in Portuguese -- the one failure
+    this whole translation exists to avoid.
+    """
+    with use_locale(current_locale()):
+        result = platform.run(question)
     # `events_for_request` already returns plain dicts, which is exactly what
     # `execution_view.build` consumes. Nothing is reshaped here: a second
     # projection of the same rows is a second place for the two to disagree.
@@ -801,54 +790,26 @@ def _run_question(platform: AgentPlatform, question: str) -> None:
 #: `execution_view._blocked_by`; the dashboard used to attribute all of them to
 #: the policy engine, so a visitor who simply clicked too fast was told the
 #: security policy had refused them.
+#: Keys, not sentences: the words are looked up at render time so the banner
+#: follows the reader's language, and the table stays a mapping from control
+#: to severity rather than a second place translations live.
 _BLOCK_EXPLANATIONS: dict[str, tuple[str, str, str]] = {
-    "policy engine": (
-        "error",
-        "Operação bloqueada pela política de segurança.",
-        "A ação solicitada não tem autorização suficiente. Nenhuma ferramenta "
-        "foi executada, e a recusa ficou registrada.",
-    ),
-    "rate limit": (
-        "warning",
-        "Limite de requisições atingido.",
-        "A demonstração limita quantas solicitações um mesmo usuário faz por "
-        "minuto. Aguarde alguns instantes e tente de novo — nada foi recusado "
-        "por motivo de segurança.",
-    ),
-    "provider budget": (
-        "warning",
-        "Orçamento diário de chamadas ao provedor esgotado.",
-        "Esta demonstração define o próprio teto de chamadas ao modelo e parou "
-        "antes de gastar mais. O provedor está de pé; foi uma decisão de custo.",
-    ),
-    "circuit breaker": (
-        "warning",
-        "Circuito aberto após falhas seguidas do provedor.",
-        "A plataforma parou de tentar depois de erros repetidos, para não "
-        "insistir contra um serviço indisponível. Ela volta a tentar sozinha.",
-    ),
-    "resource limit": (
-        "warning",
-        "Teto de recursos da requisição atingido.",
-        "A requisição excedeu um limite de passos, tempo ou tamanho definido "
-        "por requisição. É um controle de custo e de latência, não de segurança.",
-    ),
+    "policy engine": ("error", "block.policy_title", "block.policy_body"),
+    "rate limit": ("warning", "block.rate_title", "block.rate_body"),
+    "provider budget": ("warning", "block.budget_title", "block.budget_body"),
+    "circuit breaker": ("warning", "block.circuit_title", "block.circuit_body"),
+    "resource limit": ("warning", "block.limits_title", "block.limits_body"),
 }
 
 
 def _explain_block(last: dict[str, Any], view: execution_view.ExecutionView) -> None:
     """Say which control stopped the request, and stop guessing that it was policy."""
-    level, title, detail = _BLOCK_EXPLANATIONS.get(
+    level, title_key, detail_key = _BLOCK_EXPLANATIONS.get(
         view.blocked_by or "",
-        (
-            "error",
-            "Operação interrompida por um controle da plataforma.",
-            "A execução parou antes de concluir. O rastro abaixo mostra em que "
-            "ponto e por quê.",
-        ),
+        ("error", "block.generic_title", "block.generic_body"),
     )
     banner = st.error if level == "error" else st.warning
-    banner(f"**{title}**\n\n{detail}")
+    banner(f"**{t(title_key)}**\n\n{t(detail_key)}")
 
 
 def _next_step(view: execution_view.ExecutionView) -> None:
@@ -861,15 +822,14 @@ def _next_step(view: execution_view.ExecutionView) -> None:
     if view.outcome is execution_view.State.BLOCKED:
         columns = st.columns([3, 5])
         columns[0].button(
-            "Ver as políticas",
+            t("next.see_policies"),
             key="next_policies",
             width="stretch",
             on_click=goto,
-            args=("Segurança",),
+            args=("security",),
         )
         columns[1].caption(
-            "A regra que recusou esta operação está listada lá, junto com a "
-            "matriz de quem pode chamar o quê."
+            t("next.rule_listed")
         )
         return
 
@@ -878,15 +838,14 @@ def _next_step(view: execution_view.ExecutionView) -> None:
         return
     columns = st.columns([3, 5])
     columns[0].button(
-        "Tentar algo proibido",
+        t("next.try_forbidden"),
         key="next_blocked",
         width="stretch",
         on_click=goto,
-        args=("Orquestrador", blocked),
+        args=("orchestrator", blocked),
     )
     columns[1].caption(
-        "Essa foi permitida. O contraste é o ponto: agora peça uma exclusão e "
-        "veja o Policy Engine recusar antes de qualquer ferramenta rodar."
+        t("next.contrast")
     )
 
 
@@ -907,13 +866,12 @@ def _result_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
         # is the one that can be acted on.
         _confirmation_panel(platform, last)
     else:
-        st.markdown("**Resposta**")
+        st.markdown(t("result.answer_label"))
         st.markdown(as_prose(last["response"] or ""))
 
     if view.outcome is execution_view.State.OUT_OF_SCOPE:
         st.info(
-            "**Pergunta fora do alcance desta demonstração.** Nenhuma "
-            "ferramenta disponível responde a ela, e nada foi inventado.",
+            t("result.out_of_scope"),
             icon=":material/help:",
         )
     elif view.outcome is execution_view.State.BLOCKED:
@@ -926,17 +884,16 @@ def _result_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
     # decision sitting in sequence between the proposal and the tool call is
     # the thing this project exists to show, and a reader will not open an
     # expander to find an argument nobody made to them.
-    st.subheader("Como a solicitação foi processada")
+    st.subheader(t("result.how_processed"))
     _timeline(view)
     _technical_details(last, view)
 
 
 def page_orchestrator(platform: AgentPlatform) -> None:
-    eyebrow("Demonstração principal")
-    st.title("Experimente o orquestrador")
+    eyebrow(t("orch.eyebrow"))
+    st.title(t("orch.title"))
     lede(
-        "Faça uma pergunta em linguagem natural. O sistema decide quais agentes "
-        "e ferramentas são necessários."
+        t("orch.lede")
     )
 
     queued = st.session_state.pop("queued_question", None)
@@ -944,9 +901,9 @@ def page_orchestrator(platform: AgentPlatform) -> None:
         st.session_state["question_box"] = queued
 
     st.text_input(
-        "Pergunta",
+        t("orch.question"),
         key="question_box",
-        placeholder="What is the status of order ORD-1001?",
+        placeholder=t("orch.placeholder"),
         label_visibility="collapsed",
     )
 
@@ -955,7 +912,7 @@ def page_orchestrator(platform: AgentPlatform) -> None:
     )
     run_columns = st.columns([1, 5])
     run_clicked = run_columns[0].button(
-        "Executar", type="primary", key="run_question", width="stretch",
+        t("orch.run"), type="primary", key="run_question", width="stretch",
         disabled=budget.exhausted,
     )
     run_columns[1].caption(budget.message)
@@ -965,7 +922,7 @@ def page_orchestrator(platform: AgentPlatform) -> None:
         if question:
             # A spinner is the only honest signal here: the run is synchronous,
             # so without it the page simply stops responding for a second.
-            with st.spinner("Executando…"):
+            with st.spinner(t("orch.running")):
                 _run_question(platform, question)
 
     # The result comes before the examples. It used to come after them, which
@@ -978,22 +935,22 @@ def page_orchestrator(platform: AgentPlatform) -> None:
         _result_panel(platform, last)
         st.divider()
 
-    st.header("Exemplos")
+    st.header(t("orch.examples"))
     read_tab, action_tab, security_tab = st.tabs(
-        ["Consultar", "Alterar algo", "Tentar quebrar"]
+        [t("examples.read_tab"), t("examples.action_tab"), t("examples.security_tab")]
     )
     for tab, group, note, prefix in (
-        (read_tab, demo.READ_ONLY_EXAMPLES, "Somente leitura. Apenas respondem.", "r"),
+        (read_tab, demo.READ_ONLY_EXAMPLES, t("examples.read_note"), "r"),
         (
             action_tab,
             demo.ACTION_EXAMPLES,
-            "Propõem uma mudança, então param e esperam por você.",
+            t("examples.action_note"),
             "a",
         ),
         (
             security_tab,
             demo.SECURITY_EXAMPLES,
-            "São recusadas. Observe qual regra dispara.",
+            t("examples.security_note"),
             "s",
         ),
     ):
@@ -1009,11 +966,11 @@ def page_orchestrator(platform: AgentPlatform) -> None:
                 # position and React was asked to move nodes that no longer
                 # existed. That was the `insertBefore` error.
                 columns[1].button(
-                    "Perguntar",
+                    t("company.ask"),
                     key=f"ex_{prefix}_{index}",
                     width="stretch",
                     on_click=goto,
-                    args=("Orquestrador", question),
+                    args=("orchestrator", question),
                 )
 
 
@@ -1021,63 +978,42 @@ def page_orchestrator(platform: AgentPlatform) -> None:
 
 
 def page_security(platform: AgentPlatform) -> None:
-    eyebrow("Controles aplicados em execução")
-    st.title("Segurança")
+    eyebrow(t("security.eyebrow"))
+    st.title(t("nav.security"))
     lede(
-        "Segurança não está apenas documentada; ela é aplicada durante a "
-        "execução. O motor de políticas é a única autoridade."
+        t("security.lede")
     )
 
-    st.header("Quatro pilares")
+    st.header(t("security.four_pillars"))
     cards(
         [
-            (
-                "Autenticação",
-                "A API exige credencial. Sem ela, 401 — e ela nunca vem do "
-                "corpo da requisição.",
-            ),
-            (
-                "Autorização",
-                "Escopos independentes: quem pede uma ação de risco não é quem "
-                "a aprova.",
-            ),
-            (
-                "Policy Engine",
-                "Onze regras decidem ALLOW, DENY ou CONFIRM antes de qualquer "
-                "ferramenta rodar.",
-            ),
-            (
-                "Auditoria",
-                "Cada decisão é gravada com quem aprovou, autenticado — não "
-                "auto-declarado.",
-            ),
+            (t("pillar.auth"), t("pillar.auth_body")),
+            (t("pillar.authz"), t("pillar.authz_body")),
+            (t("pillar.policy"), t("pillar.policy_body")),
+            (t("pillar.audit"), t("pillar.audit_body")),
         ],
         per_row=4,
     )
 
-    st.header("As três decisões")
+    st.header(t("security.three_decisions"))
     decisions = st.columns(3)
     decisions[0].markdown(
-        f'{_decision_pill("ALLOW")}<p class="ap-lede">A ação roda. Risco baixo e '
-        "dentro do que o agente pode fazer.</p>",
+        f'{_decision_pill("ALLOW")}<p class="ap-lede">{t("decision.allow_body")}</p>',
         unsafe_allow_html=True,
     )
     decisions[1].markdown(
-        f'{_decision_pill("REQUIRE_CONFIRMATION")}<p class="ap-lede">A execução '
-        "para e espera um humano. Nada acontece até alguém decidir.</p>",
+        f'{_decision_pill("REQUIRE_CONFIRMATION")}<p class="ap-lede">'
+        f'{t("decision.confirm_body")}</p>',
         unsafe_allow_html=True,
     )
     decisions[2].markdown(
-        f'{_decision_pill("DENY")}<p class="ap-lede">Recusada. Nenhuma '
-        "ferramenta é chamada, e a recusa fica registrada.</p>",
+        f'{_decision_pill("DENY")}<p class="ap-lede">{t("decision.deny_body")}</p>',
         unsafe_allow_html=True,
     )
 
-    st.header("Experimente, do simples ao hostil")
+    st.header(t("security.try_hostile"))
     lede(
-        "Cinco cenários em ordem crescente de dificuldade. Cada um roda de "
-        "verdade — o resultado é o que a plataforma faz, não uma descrição do "
-        "que ela faria."
+        t("security.scenarios_lede")
     )
     for index, scenario in enumerate(demo.SCENARIOS):
         columns = st.columns([6, 2])
@@ -1089,24 +1025,23 @@ def page_security(platform: AgentPlatform) -> None:
         columns[0].code(scenario["ask"], language="text", wrap_lines=True)
         columns[0].caption(scenario["expect"])
         columns[1].button(
-            "Executar",
+            t("orch.run"),
             key=f"scenario_{index}",
             width="stretch",
             on_click=goto,
-            args=("Orquestrador", scenario["ask"]),
+            args=("orchestrator", scenario["ask"]),
         )
         # `watch` is what to look at in the trace once it has run, so it sits
         # one disclosure away rather than competing with the question itself.
-        with columns[0].expander("O que observar"):
+        with columns[0].expander(t("security.what_to_watch")):
             st.caption(scenario["watch"])
 
-    with st.expander("As regras de política, na íntegra"):
+    with st.expander(t("security.rules_in_full")):
         st.dataframe(describe_rules(), width="stretch", hide_index=True)
 
-    with st.expander("Quem pode chamar o quê"):
+    with st.expander(t("security.who_may_call")):
         st.caption(
-            "A matriz de capacidades. Uma ferramenta ausente da linha de um "
-            "agente não é alcançável por ele, sob nenhuma circunstância."
+            t("security.matrix_lede")
         )
         st.dataframe(describe_matrix(), width="stretch", hide_index=True)
 
@@ -1115,39 +1050,37 @@ def page_security(platform: AgentPlatform) -> None:
 
 
 def page_architecture(platform: AgentPlatform) -> None:
-    eyebrow("Como o sistema é montado")
-    st.title("Arquitetura")
+    eyebrow(t("arch.eyebrow"))
+    st.title(t("nav.architecture"))
     lede(
-        "Um caminho de requisição, uma autoridade, e a infraestrutura que "
-        "sustenta os dois."
+        t("arch.lede")
     )
 
-    st.header("Caminho da requisição")
+    st.header(t("arch.request_path"))
     flow(
         ["User", "API", "Router", "Agentes", "Policy Engine", "Tools / MCP", "Data / RAG"],
         gate="Policy Engine",
     )
 
-    st.header("Plataforma")
+    st.header(t("arch.platform"))
     cards(
         [
-            ("Kubernetes", "Deployment com probes, NetworkPolicy default-deny e HPA."),
-            ("Redis", "Confirmações, checkpoints e limites compartilhados entre réplicas."),
-            ("PostgreSQL", "Requisições, eventos e gasto — um ledger para todas as réplicas."),
-            ("Observabilidade", "Logs JSON, métricas Prometheus e correlation IDs."),
-            ("Network Policies", "Nada alcança a API além do que foi declarado."),
-            ("TLS / Ingress", "Terminação na borda; o Service permanece ClusterIP."),
+            (t("platform.k8s"), t("platform.k8s_body")),
+            (t("platform.redis"), t("platform.redis_body")),
+            (t("platform.postgres"), t("platform.postgres_body")),
+            (t("platform.observability"), t("platform.observability_body")),
+            (t("platform.netpol"), t("platform.netpol_body")),
+            (t("platform.tls"), t("platform.tls_body")),
         ]
     )
 
-    st.header("Os agentes")
-    lede("Cinco papéis especializados. Nenhum deles executa uma ferramenta.")
+    st.header(t("arch.the_agents"))
+    lede(t("arch.agents_lede"))
     for role in demo.AGENT_ROLES:
         st.markdown(f"**{role['title']}** — {role['job']}")
         st.caption(role["holds"])
     st.info(
-        "O **Policy Engine** não é um agente. Ele é a autoridade que decide o "
-        "que qualquer agente pode fazer, e não pode ser persuadido por texto.",
+        t("arch.policy_not_agent"),
         icon=":material/gavel:",
     )
 
@@ -1159,8 +1092,8 @@ def page_architecture(platform: AgentPlatform) -> None:
     # them, decided by its position rather than by a second list.
     remaining = list(demo.DEMONSTRATED[OVERVIEW_CAPABILITIES:])
     if remaining:
-        st.header("Também demonstrado")
-        lede("O que a tela inicial cita sem descrever.")
+        st.header(t("arch.also_demonstrated"))
+        lede(t("arch.also_lede"))
         cards(remaining, per_row=2)
 
 
@@ -1179,8 +1112,7 @@ def _latency_chart(rows: list[dict[str, Any]]) -> None:
     latencies = [float(row.get("latency_ms") or 0) for row in reversed(rows)]
     if not any(latencies):
         st.caption(
-            "Nenhuma requisição registrou latência ainda, então não há série "
-            "para desenhar."
+            t("obs.no_latency")
         )
         return
 
@@ -1192,7 +1124,7 @@ def _latency_chart(rows: list[dict[str, Any]]) -> None:
         else (ordered[middle - 1] + ordered[middle]) / 2
     )
 
-    st.caption("Latência por requisição (ms), da mais antiga à mais recente")
+    st.caption(t("obs.latency_caption"))
     st.altair_chart(
         alt.Chart(alt.Data(values=[
             {"n": index, "ms": value} for index, value in enumerate(latencies)
@@ -1216,18 +1148,15 @@ def _latency_chart(rows: list[dict[str, Any]]) -> None:
         width="stretch",
     )
     st.caption(
-        f"Mediana {median:.0f} ms · máximo {max(latencies):.0f} ms. Um pico "
-        "isolado costuma ser uma requisição que parou para confirmação "
-        "humana: o relógio continua correndo enquanto ela espera a decisão."
+        t("obs.latency_note", median=f"{median:.0f}", peak=f"{max(latencies):.0f}")
     )
 
 
 def page_observability(platform: AgentPlatform) -> None:
-    eyebrow("Plataforma")
-    st.title("Observabilidade")
+    eyebrow(t("arch.platform"))
+    st.title(t("nav.observability"))
     lede(
-        "Toda requisição tem um identificador, passos cronometrados e uma "
-        "decisão registrada."
+        t("obs.lede")
     )
 
     try:
@@ -1236,19 +1165,19 @@ def page_observability(platform: AgentPlatform) -> None:
         metrics = None
 
     if metrics is None or not metrics.has_data:
-        no_data("Nenhuma requisição registrada ainda.")
+        no_data(t("obs.none_recorded"))
         return
 
     columns = st.columns(4)
-    columns[0].metric("Requisições", metrics.requests)
-    columns[1].metric("Bloqueadas", metrics.blocked)
-    columns[2].metric("Chamadas de ferramenta", metrics.tool_calls)
-    columns[3].metric("Latência média", f"{metrics.avg_latency_ms:.0f} ms")
+    columns[0].metric(t("obs.requests"), metrics.requests)
+    columns[1].metric(t("obs.blocked"), metrics.blocked)
+    columns[2].metric(t("obs.tool_calls"), metrics.tool_calls)
+    columns[3].metric(t("obs.avg_latency"), f"{metrics.avg_latency_ms:.0f} ms")
 
-    st.header("Requisições recentes")
+    st.header(t("obs.recent_requests"))
     rows = platform.repository.recent_requests(limit=12)
     if not rows:
-        no_data("Sem requisições recentes.")
+        no_data(t("obs.no_recent"))
         return
 
     st.dataframe(
@@ -1267,10 +1196,9 @@ def page_observability(platform: AgentPlatform) -> None:
 
     _latency_chart(rows)
 
-    with st.expander("Detalhes"):
+    with st.expander(t("obs.details")):
         st.caption(
-            "Contadores por tipo de evento, lidos do stream de eventos "
-            "persistido."
+            t("obs.counters_lede")
         )
         summary = platform.repository.metrics_summary()
         st.dataframe(
@@ -1279,7 +1207,7 @@ def page_observability(platform: AgentPlatform) -> None:
             # values, so coercing them to text loses nothing and keeps the
             # table from raising on a spend figure.
             [
-                {"Métrica": key, "Valor": str(value)}
+                {t("obs.metric"): key, t("obs.value"): str(value)}
                 for key, value in sorted(summary.items())
             ],
             width="stretch",
@@ -1292,27 +1220,36 @@ def page_observability(platform: AgentPlatform) -> None:
 
 
 #: Six pages. The order is the order a first-time reader should meet them.
+#: Pages are keyed by slug, never by the label a reader sees.
+#:
+#: The navigation radio's key *is* `st.session_state["nav"]`, so whatever the
+#: options are is what the session stores. Keyed by label, switching language
+#: would leave `nav` holding "Segurança" while the options had become English,
+#: the guard below would find it absent, and the reader would be silently
+#: dropped back on the first page mid-visit. A slug does not change, so the
+#: page survives the switch -- which is what `test_i18n.py` pins.
 DEMO_PAGES = {
-    "Visão geral": page_overview,
-    "Empresa": page_company,
-    "Orquestrador": page_orchestrator,
-    "Segurança": page_security,
-    "Arquitetura": page_architecture,
+    "overview": page_overview,
+    "company": page_company,
+    "orchestrator": page_orchestrator,
+    "security": page_security,
+    "architecture": page_architecture,
 }
 
 PLATFORM_PAGES = {
-    "Observabilidade": page_observability,
+    "observability": page_observability,
 }
 
 PAGES = {**DEMO_PAGES, **PLATFORM_PAGES}
 
 
 def _declare_language() -> None:
-    """Tell the browser this page is Portuguese, and not to translate it.
+    """Declare the page's language, and refuse machine translation of it.
 
-    Streamlit serves ``<html lang="en">`` and offers no way to change it. Every
-    word of this dashboard is Portuguese, and that mismatch is what invites
-    Chrome to translate the page by itself -- which rewrites the DOM under
+    Streamlit serves ``<html lang="en">`` and offers no way to change it. The
+    dashboard is read in Portuguese or in English, and a page whose declared
+    language disagrees with its words is what invites Chrome to translate it
+    by itself -- which rewrites the DOM under
     React's feet, wrapping text nodes in elements React never created. React
     then unmounts a subtree on the next navigation, calls ``removeChild`` on a
     node the translator has reparented, and the reader gets
@@ -1324,15 +1261,23 @@ def _declare_language() -> None:
     error appears with translation on and does not appear with it off, and
     ~170 navigations with an untouched DOM never produced it.
 
+    ``lang`` follows the chosen locale so a screen reader says the words the
+    way they are written. ``translate="no"`` does **not**: it is unconditional
+    in both languages. Offering a language of our own is exactly the argument
+    that would make dropping it feel safe, and it is the wrong moment to --
+    a reader on the English page can still ask Chrome to translate it into a
+    third language, and that is the same DOM rewrite with the same crash.
+
     A ``<script>`` inside ``st.markdown`` cannot do this -- Streamlit does not
     execute script tags in ``unsafe_allow_html``. ``components.v1.html`` renders
     a same-origin iframe that does run JavaScript, which is the documented way
     to reach the host document, so the two attributes are set from there.
     """
+    tag = "en" if current_locale() == "en" else "pt-BR"
     components.html(
         "<script>"
         "const root = window.parent.document.documentElement;"
-        "root.lang = 'pt-BR';"
+        f"root.lang = '{tag}';"
         "root.setAttribute('translate', 'no');"
         "</script>",
         height=0,
@@ -1347,6 +1292,19 @@ def main() -> None:
     st.sidebar.title(demo.COMPANY_NAME)
     st.sidebar.caption(demo.PRODUCT_NAME)
 
+    # Above the mode badge and above the navigation, because it governs both.
+    # Keyed on `LOCALE_KEY`, so the widget *is* the locale -- the same
+    # arrangement the navigation radio uses, and for the same reason.
+    if st.session_state.get(LOCALE_KEY) not in LOCALES:
+        st.session_state[LOCALE_KEY] = DEFAULT_LOCALE
+    st.sidebar.radio(
+        t("nav.language"),
+        list(LOCALES),
+        key=LOCALE_KEY,
+        format_func=lambda code: LOCALE_LABELS[code],
+        horizontal=True,
+    )
+
     info = platform.provider_info
     # st.warning paints an olive box in the dark theme, which reads as a
     # problem. Running without a provider is the default and correct state of
@@ -1358,7 +1316,7 @@ def main() -> None:
             '<span class="ap-pill ap-allow">LIVE</span>', unsafe_allow_html=True
         )
         st.sidebar.code(info.model, language="text", wrap_lines=True)
-        st.sidebar.caption("As requisições são atendidas por um provedor real.")
+        st.sidebar.caption(t("mode.live_caption"))
     else:
         st.sidebar.markdown(
             '<span class="ap-pill ap-hold">DEMO / STUB</span>',
@@ -1366,32 +1324,53 @@ def main() -> None:
         )
         st.sidebar.code(info.model, language="text", wrap_lines=True)
         st.sidebar.caption(
-            "Nenhum modelo está sendo chamado. As respostas são "
-            "determinísticas e geradas localmente."
+            t("mode.stub_caption")
         )
 
     options = list(PAGES)
-    # The radio is keyed on the same session-state entry `goto()` writes, so
-    # the widget *is* the navigation state. Passing `index=` instead made the
-    # widget's identity depend on the current page: every navigation destroyed
-    # and rebuilt it, which is the identity churn this rewrite exists to
-    # remove, and it also made a queued page silently lose to the old index.
+    # `nav` is the page the reader is on. The radio that sets it is keyed *per
+    # locale*, and the two are deliberately separate things.
+    #
+    # One widget for both languages does not work: Streamlit's frontend marks
+    # the selected option by its rendered label, so the moment `format_func`
+    # started returning English the selection matched nothing and the sidebar
+    # showed the reader on no page at all -- while the correct page rendered
+    # beside it, because the Python side had `nav` right the whole time.
+    # Reproduced by switching to English on the Security page.
+    #
+    # A key per locale gives each language its own widget, seeded from `nav`
+    # before it is built and writing back to `nav` when it changes. `nav` never
+    # holds a translated label, so the page still survives the switch, which is
+    # the property `test_i18n.py` pins.
     if st.session_state.get("nav") not in options:
         st.session_state["nav"] = options[0]
 
-    def label(page: str) -> str:
-        return page if page in DEMO_PAGES else f"⚙ {page}"
+    nav_widget = f"nav_{current_locale()}"
+    st.session_state[nav_widget] = st.session_state["nav"]
 
-    st.sidebar.caption("**DEMONSTRAÇÃO**")
+    def remember() -> None:
+        st.session_state["nav"] = st.session_state[nav_widget]
+
+    def label(slug: str) -> str:
+        """The reader's word for a page, from the slug the session stores."""
+        name = t(f"nav.{slug}")
+        return name if slug in DEMO_PAGES else f"⚙ {name}"
+
+    st.sidebar.caption(t("nav.demo_group"))
+    # The label is deliberately not translated: Streamlit derives widget
+    # identity from its parameters, the label included, and it is collapsed so
+    # nobody reads it on screen.
     choice = st.sidebar.radio(
-        "Página", options, key="nav", format_func=label, label_visibility="collapsed"
+        "Page",
+        options,
+        key=nav_widget,
+        format_func=label,
+        label_visibility="collapsed",
+        on_change=remember,
     )
-    st.sidebar.caption("⚙ **PLATAFORMA** — os instrumentos operacionais.")
+    st.sidebar.caption(t("nav.platform_group"))
     st.sidebar.divider()
-    st.sidebar.caption(
-        f"{demo.COMPANY_NAME} é uma empresa simulada. Todas as ferramentas "
-        "operam em memória; nenhum sistema externo é contatado."
-    )
+    st.sidebar.caption(t("sidebar.simulated", company=demo.COMPANY_NAME))
 
     PAGES[choice](platform)
 

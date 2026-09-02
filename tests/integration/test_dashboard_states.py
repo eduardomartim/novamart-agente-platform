@@ -31,12 +31,12 @@ from agent_platform.platform import AgentPlatform
 APP = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
 
 PAGES = [
-    "Visão geral",
-    "Empresa",
-    "Orquestrador",
-    "Segurança",
-    "Arquitetura",
-    "Observabilidade",
+    "overview",
+    "company",
+    "orchestrator",
+    "security",
+    "architecture",
+    "observability",
 ]
 
 #: Substrings that must never appear in a rendered page.
@@ -140,7 +140,7 @@ def _render(db_path: Path, page: str) -> AppTest:
     app = AppTest.from_file(str(APP), default_timeout=90)
     app.run()
     if page != PAGES[0]:
-        app.radio[0].set_value(page).run()
+        app.radio(key="nav_pt").set_value(page).run()
     return app
 
 
@@ -183,7 +183,7 @@ def test_pages_disclose_nothing_over_failure_states(page, states_db):
 @pytest.mark.slow
 def test_provider_failure_is_explained_not_dumped(states_db):
     """A failed request must read as an explanation, not an exception."""
-    text = _rendered_text(_render(states_db, "Observabilidade"))
+    text = _rendered_text(_render(states_db, "observability"))
     assert "someone" not in text, "the provider error disclosed a local username"
     assert "Traceback" not in text
 
@@ -191,7 +191,7 @@ def test_provider_failure_is_explained_not_dumped(states_db):
 @pytest.mark.slow
 def test_security_page_shows_the_denial_that_happened(states_db):
     """A real denial must be visible; the page is evidence, not decoration."""
-    app = _render(states_db, "Segurança")
+    app = _render(states_db, "security")
     text = _rendered_text(app)
     assert text.strip(), "the security page rendered nothing despite real denials"
     assert not app.exception
@@ -200,7 +200,7 @@ def test_security_page_shows_the_denial_that_happened(states_db):
 @pytest.mark.slow
 def test_pending_confirmation_does_not_render_as_an_error(states_db):
     """A suspended request is a normal state, not a failure."""
-    app = _render(states_db, "Observabilidade")
+    app = _render(states_db, "observability")
     assert not app.exception
     errors = " ".join(e.value for e in app.error)
     assert "awaiting_confirmation" not in errors

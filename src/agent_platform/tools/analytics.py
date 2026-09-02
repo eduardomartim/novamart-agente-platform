@@ -42,6 +42,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..i18n import current_locale, pick
 from ..models import AgentName, Capability, RiskLevel
 from . import dataset as data
 from .execution import require_gateway
@@ -56,43 +57,69 @@ OPEN_ORDER_STATUSES: Final[frozenset[str]] = frozenset({"processing", "shipped"}
 #: state the dataset uses.
 UNRESOLVED_TICKET_STATUSES: Final[frozenset[str]] = frozenset({"open", "escalated"})
 
-#: Tier labels as a reader would say them. The dataset stores the English key.
-TIER_LABELS: Final[dict[str, str]] = {
-    "platinum": "Platinum",
-    "gold": "Ouro",
-    "standard": "Standard",
+#: Vocabulary, per locale. The dataset stores one English key per value and
+#: keeps storing it: only the words a reader sees are translated, so every
+#: number, filter and comparison below is computed from the same key in both
+#: languages and cannot drift between them.
+_LABELS: Final[dict[str, dict[str, dict[str, str]]]] = {
+    "tier": {
+        "pt": {"platinum": "Platinum", "gold": "Ouro", "standard": "Standard"},
+        "en": {"platinum": "Platinum", "gold": "Gold", "standard": "Standard"},
+    },
+    # So a Portuguese sentence does not report "2 escalated e 7 open".
+    "ticket_status": {
+        "pt": {"open": "abertos", "escalated": "escalados"},
+        "en": {"open": "open", "escalated": "escalated"},
+    },
+    "category": {
+        "pt": {
+            "peripherals": "periféricos", "accessories": "acessórios",
+            "displays": "monitores", "audio": "áudio",
+            "furniture": "mobiliário", "storage": "armazenamento",
+        },
+        "en": {
+            "peripherals": "peripherals", "accessories": "accessories",
+            "displays": "displays", "audio": "audio",
+            "furniture": "furniture", "storage": "storage",
+        },
+    },
+    "status": {
+        "pt": {
+            "processing": "em processamento", "shipped": "enviado",
+            "delivered": "entregue", "cancelled": "cancelado",
+            "returned": "devolvido",
+        },
+        "en": {
+            "processing": "processing", "shipped": "shipped",
+            "delivered": "delivered", "cancelled": "cancelled",
+            "returned": "returned",
+        },
+    },
+    "priority": {
+        "pt": {"high": "alta", "normal": "normal", "low": "baixa"},
+        "en": {"high": "high", "normal": "normal", "low": "low"},
+    },
 }
 
-#: Ticket-status labels, so a Portuguese sentence does not report "2 escalated
-#: e 7 open".
-TICKET_STATUS_LABELS: Final[dict[str, str]] = {
-    "open": "abertos",
-    "escalated": "escalados",
-}
 
-#: Catalogue categories, in the words a reader uses. The dataset stores the
-#: English key; only the sentence changes.
-CATEGORY_LABELS: Final[dict[str, str]] = {
-    "peripherals": "periféricos",
-    "accessories": "acessórios",
-    "displays": "monitores",
-    "audio": "áudio",
-    "furniture": "mobiliário",
-    "storage": "armazenamento",
-}
+def _label(table: str, key: str) -> str:
+    """One label in the locale in force, falling back to the stored key.
 
-#: Order-status labels for the same reason.
-STATUS_LABELS: Final[dict[str, str]] = {
-    "processing": "em processamento",
-    "shipped": "enviado",
-    "delivered": "entregue",
-    "cancelled": "cancelado",
-    "returned": "devolvido",
-}
+    A missing translation shows the dataset's own word rather than raising:
+    these sit on the path of every answer, and a sentence with one English
+    word in it beats a request that fails.
+    """
+    return _LABELS[table][current_locale()].get(key, key)
 
 
 def _brl(value: float) -> str:
-    """Format a number the way a Brazilian reader expects to see money."""
+    """Format a number the way a Brazilian reader expects to see money.
+
+    The currency does not change with the locale, and neither does the
+    grouping. NovaMart's orders are in reais whoever is reading, so an English
+    reader sees ``R$ 33.002,50`` too -- converting it would invent an exchange
+    rate, and re-grouping it would make the same figure look like two.
+    """
     whole = f"{value:,.2f}"
     return "R$ " + whole.replace(",", "@").replace(".", ",").replace("@", ".")
 
@@ -101,10 +128,9 @@ def _plural(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
 
 
-#: Priority in the words a reader uses.
-_PRIORITY_LABELS: Final[dict[str, str]] = {
-    "high": "alta", "normal": "normal", "low": "baixa",
-}
+def _n(count: int, pt_one: str, pt_many: str, en_one: str, en_many: str) -> str:
+    """A counted noun, agreeing in number, in the locale in force."""
+    return pick(_plural(count, pt_one, pt_many), _plural(count, en_one, en_many))
 
 
 def _customer_of(ticket: dict[str, Any]) -> str:
@@ -191,15 +217,16 @@ def count_customers() -> dict[str, Any]:
 
     total = len(data.CUSTOMERS)
     parts = ", ".join(
-        f"{count} {TIER_LABELS.get(tier, tier)}"
+        f"{count} {_label('tier', tier)}"
         for tier, count in sorted(by_tier.items(), key=lambda kv: -kv[1])
     )
     return {
         "found": True,
         "total": total,
         "by_tier": by_tier,
-        "summary": (
-            f"Temos {total} clientes cadastrados: {parts}."
+        "summary": pick(
+            f"Temos {total} clientes cadastrados: {parts}.",
+            f"We have {total} registered customers: {parts}.",
         ),
     }
 
@@ -213,14 +240,17 @@ def count_products() -> dict[str, Any]:
 
     total = len(data.PRODUCTS)
     parts = ", ".join(
-        f"{count} em {CATEGORY_LABELS.get(category, category)}"
+        f"{count} {pick('em', 'in')} {_label('category', category)}"
         for category, count in sorted(by_category.items(), key=lambda kv: -kv[1])
     )
     return {
         "found": True,
         "total": total,
         "by_category": by_category,
-        "summary": f"O catálogo tem {total} produtos: {parts}.",
+        "summary": pick(
+            f"O catálogo tem {total} produtos: {parts}.",
+            f"The catalogue holds {total} products: {parts}.",
+        ),
     }
 
 
@@ -235,22 +265,24 @@ def list_products(category: str | None = None, limit: int = 15) -> dict[str, Any
     products = sorted(data.PRODUCTS.values(), key=lambda p: p["name"])
     if category:
         selected = [p for p in products if p["category"] == category]
-        described = f"na categoria {CATEGORY_LABELS.get(category, category)}"
+        described = pick(
+            f"na categoria {_label('category', category)}",
+            f"in {_label('category', category)}",
+        )
     else:
         selected = products
-        described = "no catálogo"
+        described = pick("no catálogo", "in the catalogue")
 
     if not selected:
-        summary = f"Nenhum produto {described}."
+        summary = pick(f"Nenhum produto {described}.", f"No products {described}.")
     else:
         named = "; ".join(
             f"{p['name']} ({_brl(p['unit_price_brl'])})" for p in selected[:limit]
         )
-        more = "" if len(selected) <= limit else f" e mais {len(selected) - limit}"
-        summary = (
-            f"{len(selected)} {_plural(len(selected), 'produto', 'produtos')} "
-            f"{described}: {named}{more}."
-        )
+        rest = len(selected) - limit
+        more = "" if len(selected) <= limit else pick(f" e mais {rest}", f" and {rest} more")
+        noun = _n(len(selected), "produto", "produtos", "product", "products")
+        summary = f"{len(selected)} {noun} {described}: {named}{more}."
 
     return {
         "found": True,
@@ -275,7 +307,10 @@ def product_price_range() -> dict[str, Any]:
     require_gateway("product_price_range")
     products = list(data.PRODUCTS.values())
     if not products:
-        return {"found": True, "summary": "O catálogo está vazio."}
+        return {
+            "found": True,
+            "summary": pick("O catálogo está vazio.", "The catalogue is empty."),
+        }
 
     cheapest = min(products, key=lambda p: p["unit_price_brl"])
     dearest = max(products, key=lambda p: p["unit_price_brl"])
@@ -285,11 +320,15 @@ def product_price_range() -> dict[str, Any]:
         "cheapest": {"name": cheapest["name"], "unit_price_brl": cheapest["unit_price_brl"]},
         "most_expensive": {"name": dearest["name"], "unit_price_brl": dearest["unit_price_brl"]},
         "average_price_brl": round(average, 2),
-        "summary": (
+        "summary": pick(
             f"O produto mais caro é {dearest['name']}, a "
             f"{_brl(dearest['unit_price_brl'])}; o mais barato é "
             f"{cheapest['name']}, a {_brl(cheapest['unit_price_brl'])}. "
-            f"O preço médio do catálogo é {_brl(average)}."
+            f"O preço médio do catálogo é {_brl(average)}.",
+            f"The most expensive product is {dearest['name']}, at "
+            f"{_brl(dearest['unit_price_brl'])}; the cheapest is "
+            f"{cheapest['name']}, at {_brl(cheapest['unit_price_brl'])}. "
+            f"The catalogue's average price is {_brl(average)}.",
         ),
     }
 
@@ -310,7 +349,11 @@ def top_selling_products(limit: int = 5, by: str = "units") -> dict[str, Any]:
             entry["revenue"] += line["line_total_brl"]
 
     if not tally:
-        return {"found": True, "products": [], "summary": "Nenhum item vendido ainda."}
+        return {
+            "found": True,
+            "products": [],
+            "summary": pick("Nenhum item vendido ainda.", "Nothing has sold yet."),
+        }
 
     ranked = sorted(tally.items(), key=lambda kv: (kv[1][by], kv[1]["units"]), reverse=True)
     rows = [
@@ -320,16 +363,23 @@ def top_selling_products(limit: int = 5, by: str = "units") -> dict[str, Any]:
     lead = rows[0]
     if by == "revenue":
         listed = ", ".join(f"{r['name']} ({_brl(r['revenue_brl'])})" for r in rows)
-        summary = (
+        summary = pick(
             f"{lead['name']} é o produto que mais gerou receita: "
             f"{_brl(lead['revenue_brl'])} em {lead['units']} unidades. "
-            f"Os principais por receita: {listed}."
+            f"Os principais por receita: {listed}.",
+            f"{lead['name']} produced the most revenue: "
+            f"{_brl(lead['revenue_brl'])} across {lead['units']} units. "
+            f"Leaders by revenue: {listed}.",
         )
     else:
-        listed = ", ".join(f"{r['name']} ({r['units']} un.)" for r in rows)
-        summary = (
+        listed = ", ".join(
+            f"{r['name']} ({r['units']} {pick('un.', 'units')})" for r in rows
+        )
+        summary = pick(
             f"{lead['name']} é o produto mais vendido, com {lead['units']} "
-            f"unidades. Os principais por volume: {listed}."
+            f"unidades. Os principais por volume: {listed}.",
+            f"{lead['name']} is the best seller, with {lead['units']} "
+            f"units. Leaders by volume: {listed}."
         )
     return {"found": True, "ranked_by": by, "products": rows, "summary": summary}
 
@@ -356,10 +406,13 @@ def revenue_total() -> dict[str, Any]:
         "cancelled_or_returned_brl": round(lost, 2),
         "net_brl": round(net, 2),
         "average_order_brl": round(average, 2),
-        "summary": (
+        "summary": pick(
             f"Os {len(orders)} pedidos somam {_brl(total)}, uma média de "
             f"{_brl(average)} por pedido. Descontando cancelamentos e "
-            f"devoluções ({_brl(lost)}), o valor efetivo é {_brl(net)}."
+            f"devoluções ({_brl(lost)}), o valor efetivo é {_brl(net)}.",
+            f"The {len(orders)} orders total {_brl(total)}, an average of "
+            f"{_brl(average)} per order. Net of cancellations and returns "
+            f"({_brl(lost)}), the effective value is {_brl(net)}.",
         ),
     }
 
@@ -377,36 +430,44 @@ def list_orders(status: str | None = None, limit: int = 10) -> dict[str, Any]:
     )
     if status == "open":
         selected = [o for o in orders if o["status"] in OPEN_ORDER_STATUSES]
-        described = "em aberto (ainda não entregues)"
+        described = pick("em aberto (ainda não entregues)", "open (not yet delivered)")
     elif status:
         selected = [o for o in orders if o["status"] == status]
-        described = STATUS_LABELS.get(status, status)
+        described = _label('status', status)
     else:
         selected = orders
-        described = "no total"
+        described = pick("no total", "in total")
 
     shown = selected[:limit]
     value = sum(order["total_brl"] for order in selected)
 
     if not selected:
-        summary = f"Nenhum pedido {described} no conjunto de dados."
+        summary = pick(
+            f"Nenhum pedido {described} no conjunto de dados.",
+            f"No orders {described} in the dataset.",
+        )
     else:
         # The list is newest first, so the sentence names the newest. Naming
         # the oldest read as an odd answer to "show me recent orders".
         newest = max(order["placed_on"] for order in selected)
-        summary = (
-            f"{len(selected)} {_plural(len(selected), 'pedido', 'pedidos')} "
-            f"{described}, somando {_brl(value)}. O mais recente é de {newest}."
+        noun = _n(len(selected), "pedido", "pedidos", "order", "orders")
+        summary = pick(
+            f"{len(selected)} {noun} {described}, somando {_brl(value)}. "
+            f"O mais recente é de {newest}.",
+            f"{len(selected)} {noun} {described}, totalling {_brl(value)}. "
+            f"The most recent is from {newest}.",
         )
         if status == "open":
             # The dataset records no promised delivery date, so "late" cannot be
             # computed. Saying which orders are still open is the honest answer
             # to "which orders are delayed?", and this sentence is what stops it
             # from being read as more than that.
-            summary += (
+            summary += pick(
                 " Esta demonstração não registra prazo de entrega, então não é "
                 "possível dizer quais estão atrasados — apenas quais seguem "
-                "abertos."
+                "abertos.",
+                " This demo records no delivery deadline, so it cannot say "
+                "which orders are late — only which are still open.",
             )
 
     return {
@@ -460,26 +521,35 @@ def top_customers(limit: int = 5, by: str = "revenue") -> dict[str, Any]:
         return {
             "found": True,
             "customers": [],
-            "summary": "Não há pedidos registrados para ranquear clientes.",
+            "summary": pick(
+                "Não há pedidos registrados para ranquear clientes.",
+                "There are no recorded orders to rank customers by.",
+            ),
         }
 
     lead = rows[0]
     if by == "orders":
         listed = ", ".join(
-            f"{row['name']} ({row['orders']} pedidos)" for row in rows
+            f"{row['name']} ({row['orders']} {pick('pedidos', 'orders')})"
+            for row in rows
         )
-        summary = (
+        summary = pick(
             f"{lead['name']} é quem mais comprou, com {lead['orders']} pedidos. "
-            f"Os principais por volume: {listed}."
+            f"Os principais por volume: {listed}.",
+            f"{lead['name']} placed the most orders, with {lead['orders']}. "
+            f"Leaders by volume: {listed}.",
         )
     else:
         listed = ", ".join(
             f"{row['name']} ({_brl(row['revenue_brl'])})" for row in rows
         )
-        summary = (
+        summary = pick(
             f"{lead['name']} é a cliente de maior valor, com "
             f"{_brl(lead['revenue_brl'])} em {lead['orders']} pedidos. "
-            f"Os principais por valor: {listed}."
+            f"Os principais por valor: {listed}.",
+            f"{lead['name']} is the highest-value customer, with "
+            f"{_brl(lead['revenue_brl'])} across {lead['orders']} orders. "
+            f"Leaders by value: {listed}.",
         )
 
     return {
@@ -512,19 +582,30 @@ def open_tickets(priority: str | None = None) -> dict[str, Any]:
 
     if not unresolved:
         summary = (
-            f"Não há tickets em aberto de prioridade "
-            f"{_PRIORITY_LABELS.get(priority, priority)}."
+            pick(
+                f"Não há tickets em aberto de prioridade "
+                f"{_label('priority', priority)}.",
+                f"There are no open {_label('priority', priority)}-priority "
+                f"tickets.",
+            )
             if priority
-            else "Não há tickets em aberto no momento."
+            else pick(
+                "Não há tickets em aberto no momento.",
+                "There are no open tickets right now.",
+            )
         )
     elif priority:
         nomes = sorted({_customer_of(t) for t in unresolved})
-        summary = (
+        who = _n(len(nomes), "cliente", "clientes", "customer", "customers")
+        summary = pick(
             f"{len(unresolved)} "
             f"{_plural(len(unresolved), 'ticket', 'tickets')} de prioridade "
-            f"{_PRIORITY_LABELS.get(priority, priority)} em aberto, "
-            f"de {len(nomes)} {_plural(len(nomes), 'cliente', 'clientes')}: "
-            f"{', '.join(nomes)}."
+            f"{_label('priority', priority)} em aberto, "
+            f"de {len(nomes)} {who}: {', '.join(nomes)}.",
+            f"{len(unresolved)} open "
+            f"{_label('priority', priority)}-priority "
+            f"{_plural(len(unresolved), 'ticket', 'tickets')}, "
+            f"from {len(nomes)} {who}: {', '.join(nomes)}.",
         )
     else:
         # Says what was counted. The dashboard's own KPI counts only the
@@ -533,28 +614,34 @@ def open_tickets(priority: str | None = None) -> dict[str, Any]:
         by_status: dict[str, int] = {}
         for ticket in unresolved:
             by_status[ticket["status"]] = by_status.get(ticket["status"], 0) + 1
-        breakdown = " e ".join(
-            f"{count} {TICKET_STATUS_LABELS.get(status, status)}"
+        breakdown = pick(" e ", " and ").join(
+            f"{count} {_label('ticket_status', status)}"
             for status, count in sorted(by_status.items())
         )
-        summary = (
-            f"Existem {len(unresolved)} tickets não resolvidos ({breakdown})"
+        summary = pick(
+            f"Existem {len(unresolved)} tickets não resolvidos ({breakdown})",
+            f"There are {len(unresolved)} unresolved tickets ({breakdown})",
         )
         if high:
             subjects = "; ".join(t["subject"] for t in high[:3])
-            summary += (
+            summary += pick(
                 f", {len(high)} de alta prioridade. Os mais urgentes tratam de: "
-                f"{subjects}."
+                f"{subjects}.",
+                f", {len(high)} of them high priority. The most urgent are "
+                f"about: {subjects}.",
             )
         else:
-            summary += ", nenhum de alta prioridade."
+            summary += pick(
+                ", nenhum de alta prioridade.", ", none of them high priority."
+            )
         # Who they belong to. The names were already in the payload and only
         # the subjects were spoken, so "which customers have tickets?" got a
         # list of complaints and no customer.
         nomes = sorted({_customer_of(t) for t in unresolved})
-        summary += (
-            f" Os tickets são de {len(nomes)} "
-            f"{_plural(len(nomes), 'cliente', 'clientes')}: {', '.join(nomes)}."
+        who = _n(len(nomes), "cliente", "clientes", "customer", "customers")
+        summary += pick(
+            f" Os tickets são de {len(nomes)} {who}: {', '.join(nomes)}.",
+            f" The tickets belong to {len(nomes)} {who}: {', '.join(nomes)}.",
         )
 
     return {
@@ -596,14 +683,35 @@ def business_overview() -> dict[str, Any]:
     stuck = [s for s in data.SHIPMENTS.values() if s["state"] == "returned_to_sender"]
 
     points = [
-        f"{len(high)} {_plural(len(high), 'ticket', 'tickets')} de alta prioridade "
-        f"em aberto",
-        f"{len(open_orders)} {_plural(len(open_orders), 'pedido', 'pedidos')} "
-        f"ainda não entregues",
-        f"{len(cancelled)} {_plural(len(cancelled), 'cancelamento', 'cancelamentos')} "
-        f"e {len(returned)} {_plural(len(returned), 'devolução', 'devoluções')}",
-        f"{len(stuck)} {_plural(len(stuck), 'entrega devolvida', 'entregas devolvidas')} "
-        f"ao remetente",
+        pick(
+            f"{len(high)} {_plural(len(high), 'ticket', 'tickets')} de alta "
+            f"prioridade em aberto",
+            f"{len(high)} open high-priority "
+            f"{_plural(len(high), 'ticket', 'tickets')}",
+        ),
+        pick(
+            f"{len(open_orders)} "
+            f"{_plural(len(open_orders), 'pedido', 'pedidos')} "
+            f"ainda não entregues",
+            f"{len(open_orders)} "
+            f"{_plural(len(open_orders), 'order', 'orders')} not yet delivered",
+        ),
+        pick(
+            f"{len(cancelled)} "
+            f"{_plural(len(cancelled), 'cancelamento', 'cancelamentos')} "
+            f"e {len(returned)} "
+            f"{_plural(len(returned), 'devolução', 'devoluções')}",
+            f"{len(cancelled)} "
+            f"{_plural(len(cancelled), 'cancellation', 'cancellations')} "
+            f"and {len(returned)} {_plural(len(returned), 'return', 'returns')}",
+        ),
+        pick(
+            f"{len(stuck)} "
+            f"{_plural(len(stuck), 'entrega devolvida', 'entregas devolvidas')} "
+            f"ao remetente",
+            f"{len(stuck)} "
+            f"{_plural(len(stuck), 'shipment', 'shipments')} returned to sender",
+        ),
     ]
     return {
         "found": True,
@@ -613,7 +721,10 @@ def business_overview() -> dict[str, Any]:
         "returned_orders": len(returned),
         "shipments_returned_to_sender": len(stuck),
         "summary": (
-            "Pontos que merecem atenção neste conjunto de dados: "
+            pick(
+                "Pontos que merecem atenção neste conjunto de dados: ",
+                "Points worth attention in this dataset: ",
+            )
             + "; ".join(points)
             + "."
         ),

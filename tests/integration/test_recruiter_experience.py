@@ -70,7 +70,7 @@ def _render(db_path: Path, page: str | None = None) -> AppTest:
     app = AppTest.from_file(str(APP), default_timeout=90)
     app.run()
     if page:
-        app.radio[0].set_value(page).run()
+        app.radio(key="nav_pt").set_value(page).run()
     return app
 
 
@@ -162,7 +162,7 @@ def test_landing_shows_what_can_be_asked(seeded_db):
 
 @pytest.mark.slow
 def test_runner_offers_every_category_of_example(seeded_db):
-    text = _main_text(_render(seeded_db, "Orquestrador"))
+    text = _main_text(_render(seeded_db, "orchestrator"))
     for question, _ in demo.READ_ONLY_EXAMPLES[:2]:
         assert question in text
     for question, _ in demo.ACTION_EXAMPLES[:1]:
@@ -176,7 +176,7 @@ def test_runner_offers_every_category_of_example(seeded_db):
 
 @pytest.mark.slow
 def test_agents_page_names_every_real_agent(seeded_db):
-    text = _main_text(_render(seeded_db, "Arquitetura"))
+    text = _main_text(_render(seeded_db, "architecture"))
     for role in demo.AGENT_ROLES:
         assert role["title"] in text, f"{role['title']} is missing from the agents page"
 
@@ -184,7 +184,7 @@ def test_agents_page_names_every_real_agent(seeded_db):
 @pytest.mark.slow
 def test_agents_page_says_policy_engine_is_not_an_agent(seeded_db):
     """Architectural literacy: the authority is not one of the agents."""
-    text = _main_text(_render(seeded_db, "Arquitetura")).lower()
+    text = _main_text(_render(seeded_db, "architecture")).lower()
     assert "policy engine" in text
     assert "não é um agente" in text, (
         "the page does not distinguish the policy engine from the agents"
@@ -197,14 +197,14 @@ def test_agents_page_says_policy_engine_is_not_an_agent(seeded_db):
 @pytest.mark.slow
 def test_scenarios_are_ordered_by_difficulty(seeded_db):
     """A visitor should be able to start easy and escalate."""
-    text = _main_text(_render(seeded_db, "Segurança"))
+    text = _main_text(_render(seeded_db, "security"))
     for scenario in demo.SCENARIOS:
         assert scenario["level"] in text, f"level {scenario['level']} missing"
 
 
 @pytest.mark.slow
 def test_data_explorer_shows_ids_a_visitor_can_use(seeded_db):
-    text = _main_text(_render(seeded_db, "Empresa"))
+    text = _main_text(_render(seeded_db, "company"))
     for marker in ("CUS-2001", "ORD-1001", "TKT-4001"):
         assert marker in text, f"{marker} is not visible in the data explorer"
 
@@ -235,15 +235,20 @@ def test_stub_mode_is_stated_in_plain_language(seeded_db):
 def test_navigation_puts_the_demo_before_the_technical_pages(seeded_db):
     """The guided journey comes first; the instruments are clearly secondary.
 
-    ``options`` reports the *rendered* labels, which is what a visitor reads --
-    so this asserts on exactly what they see in the sidebar.
+    ``options`` reports the *rendered* labels -- the slug the session stores,
+    put through the sidebar's `format_func` -- which is what a visitor reads,
+    so this asserts on exactly what they see. The label is looked up rather
+    than spelled out, because it now depends on the chosen language while the
+    ordering and the grouping do not.
     """
     import app as dashboard_app
 
     app = _render(seeded_db)
-    labels = list(app.radio[0].options)
+    labels = list(app.radio(key="nav_pt").options)
 
-    assert labels[0] == "Visão geral", "the guided entry point is not first"
+    assert labels[0] == dashboard_app.t("nav.overview"), (
+        "the guided entry point is not first"
+    )
 
     demo_count = len(dashboard_app.DEMO_PAGES)
     demo_labels, platform_labels = labels[:demo_count], labels[demo_count:]
@@ -266,7 +271,7 @@ def test_the_runner_is_labelled_for_a_visitor_not_a_developer(seeded_db):
     The sidebar is a six-item index of nouns, so the invitation is the page's
     own title -- which is the first thing read after clicking the entry.
     """
-    app = _render(seeded_db, "Orquestrador")
+    app = _render(seeded_db, "orchestrator")
     titles = [e.value for e in app.title]
     assert any("Experimente" in title for title in titles), (
         f"the runner page opens with {titles!r}, which reads as a route name"
@@ -302,7 +307,7 @@ def test_the_test_matrix_is_one_click_from_the_landing_page(seeded_db):
     escalation its own home on Segurança -- still one sidebar click away, and
     still all five together rather than one per page.
     """
-    text = _main_text(_render(seeded_db, "Segurança"))
+    text = _main_text(_render(seeded_db, "security"))
     levels = [s["level"].split(" - ")[-1] for s in demo.SCENARIOS]
     found = sum(1 for level in levels if level in text)
     assert found == len(levels), (

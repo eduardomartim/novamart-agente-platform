@@ -245,25 +245,25 @@ def test_the_navigation_keeps_one_identity_across_every_page(app):
     """
     import app as dashboard
 
-    first = app.radio[0].id
+    first = app.radio(key="nav_pt").id
     for page in dashboard.PAGES:
-        app.radio[0].set_value(page).run()
-        assert app.radio[0].value == page, f"navigation to {page} did not take"
-        assert app.radio[0].id == first, (
+        app.radio(key="nav_pt").set_value(page).run()
+        assert app.radio(key="nav_pt").value == page, f"navigation to {page} did not take"
+        assert app.radio(key="nav_pt").id == first, (
             f"the navigation radio changed identity on {page}: "
-            f"{first} -> {app.radio[0].id}"
+            f"{first} -> {app.radio(key='nav_pt').id}"
         )
 
 
 @pytest.mark.slow
 def test_example_buttons_keep_their_identity_across_a_round_trip(app):
     """Leave the page, come back, and the same buttons must be the same nodes."""
-    app.radio[0].set_value("Orquestrador").run()
+    app.radio(key="nav_pt").set_value("orchestrator").run()
     before = sorted(button.id for button in app.button)
     assert before, "the orchestrator page rendered no buttons"
 
-    app.radio[0].set_value("Arquitetura").run()
-    app.radio[0].set_value("Orquestrador").run()
+    app.radio(key="nav_pt").set_value("architecture").run()
+    app.radio(key="nav_pt").set_value("orchestrator").run()
 
     assert sorted(button.id for button in app.button) == before, (
         "a button on the orchestrator page came back with a different id, so "
@@ -277,7 +277,7 @@ def test_no_page_raises(app):
     import app as dashboard
 
     for page in dashboard.PAGES:
-        app.radio[0].set_value(page).run()
+        app.radio(key="nav_pt").set_value(page).run()
         assert not app.exception, (
             f"{page} raised: {[str(e.value)[:200] for e in app.exception]}"
         )

@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from i18n import t
+
 AGENT_ORDER = ("router", "researcher", "executor", "validator")
 
 
@@ -101,30 +103,31 @@ class ExecutionView:
 
 #: Events worth showing a visitor, in plain language. Anything absent from this
 #: map is omitted rather than guessed at -- a step nobody can explain is noise.
-_STEP_LABELS: dict[str, str] = {
-    "request_started": "Requisição recebida",
-    "input_flagged": "Entrada com forma de injeção",
-    "input_sensitive": "Entrada contém dado sensível",
-    "input_rejected": "Entrada rejeitada",
-    "rate_limited": "Limite de taxa aplicado",
-    "route_selected": "Roteador classificou a requisição",
-    "agent_started": "Agente iniciou",
-    "action_proposed": "Ação proposta",
-    #: A physical attempt the provider lost. Shown because a request that took
-    #: thirty seconds and one that took one look identical without it.
-    "llm_retry": "Tentativa ao provedor falhou, repetindo",
-    "llm_failed": "Provedor falhou em todas as tentativas",
-    "policy_decision": "Motor de políticas decidiu",
-    "confirmation_requested": "Aguardando aprovação humana",
-    "confirmation_resolved": "Decisão humana registrada",
-    "tool_call": "Ferramenta executada",
-    "validation": "Resultado validado",
-    "resource_limit": "Teto de recursos atingido",
-    "circuit_open": "Circuito do provedor aberto",
-    "prompt_redacted": "Credenciais removidas antes da saída",
-    "output_redacted": "Resposta redigida",
-    "request_completed": "Resposta devolvida",
-    "request_failed": "Requisição falhou",
+#: Event -> catalogue key. The words themselves live in the catalogues, so
+#: the timeline follows the reader's language and this stays a map of which
+#: events are worth showing at all.
+_STEP_KEYS: dict[str, str] = {
+    "request_started": "step.request_started",
+    "input_flagged": "step.input_flagged",
+    "input_sensitive": "step.input_sensitive",
+    "input_rejected": "step.input_rejected",
+    "rate_limited": "step.rate_limited",
+    "route_selected": "step.route_selected",
+    "agent_started": "step.agent_started",
+    "action_proposed": "step.action_proposed",
+    "llm_retry": "step.llm_retry",
+    "llm_failed": "step.llm_failed",
+    "policy_decision": "step.policy_decision",
+    "confirmation_requested": "step.confirmation_requested",
+    "confirmation_resolved": "step.confirmation_resolved",
+    "tool_call": "step.tool_call",
+    "validation": "step.validation",
+    "resource_limit": "step.resource_limit",
+    "circuit_open": "step.circuit_open",
+    "prompt_redacted": "step.prompt_redacted",
+    "output_redacted": "step.output_redacted",
+    "request_completed": "step.request_completed",
+    "request_failed": "step.request_failed",
 }
 
 #: Deliberately omitted from the timeline: a model call is an implementation
@@ -295,14 +298,15 @@ def _steps(events: list[dict[str, Any]]) -> tuple[Step, ...]:
         kind = event.get("event_type") or ""
         if kind in _HIDDEN:
             continue
-        label = _STEP_LABELS.get(kind)
-        if label is None:
+        label_key = _STEP_KEYS.get(kind)
+        if label_key is None:
             continue
+        label = t(label_key)
 
         agent = event.get("agent")
         tool = event.get("tool")
         if kind == "agent_started" and agent:
-            label = f"{agent.capitalize()} iniciou"
+            label = t("step.agent_named_started", agent=agent.capitalize())
 
         bits = []
         if tool:

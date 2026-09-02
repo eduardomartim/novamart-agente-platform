@@ -16,6 +16,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..i18n import current_locale, pick
 from ..models import AgentName, Capability, RiskLevel
 from ..retrieval import strategy as retrieval_strategy
 from .dataset import (
@@ -152,30 +153,41 @@ def search(query: str) -> dict[str, Any]:
     }
 
 
-#: Order and ticket vocabulary as a reader says it. The dataset stores the
-#: English key; only the sentence changes, never the stored value.
-_ORDER_STATUS_PT: Final[dict[str, str]] = {
-    "processing": "em processamento",
-    "shipped": "enviado",
-    "delivered": "entregue",
-    "cancelled": "cancelado",
-    "returned": "devolvido",
+#: Order and ticket vocabulary as a reader says it, per locale. The dataset
+#: stores the English key and keeps storing it: only the sentence changes,
+#: never the stored value, so the record a caller reads is the same in both
+#: languages and only the prose beside it differs.
+_WORDS: Final[dict[str, dict[str, dict[str, str]]]] = {
+    "order_status": {
+        "pt": {
+            "processing": "em processamento", "shipped": "enviado",
+            "delivered": "entregue", "cancelled": "cancelado",
+            "returned": "devolvido",
+        },
+        "en": {
+            "processing": "processing", "shipped": "shipped",
+            "delivered": "delivered", "cancelled": "cancelled",
+            "returned": "returned",
+        },
+    },
+    "ticket_status": {
+        "pt": {"open": "aberto", "escalated": "escalado", "resolved": "resolvido"},
+        "en": {"open": "open", "escalated": "escalated", "resolved": "resolved"},
+    },
+    "priority": {
+        "pt": {"high": "alta", "normal": "normal", "low": "baixa"},
+        "en": {"high": "high", "normal": "normal", "low": "low"},
+    },
+    "tier": {
+        "pt": {"platinum": "Platinum", "gold": "Ouro", "standard": "Standard"},
+        "en": {"platinum": "Platinum", "gold": "Gold", "standard": "Standard"},
+    },
 }
-_TICKET_STATUS_PT: Final[dict[str, str]] = {
-    "open": "aberto",
-    "escalated": "escalado",
-    "resolved": "resolvido",
-}
-_PRIORITY_PT: Final[dict[str, str]] = {
-    "high": "alta",
-    "normal": "normal",
-    "low": "baixa",
-}
-_TIER_PT: Final[dict[str, str]] = {
-    "platinum": "Platinum",
-    "gold": "Ouro",
-    "standard": "Standard",
-}
+
+
+def _word(table: str, key: str) -> str:
+    """One label in the locale in force, falling back to the stored key."""
+    return _WORDS[table][current_locale()].get(key, key)
 
 
 def _money(value: float) -> str:
@@ -190,8 +202,11 @@ def _customer_name(customer_id: str) -> str:
 
 
 def _order_phrase(order: dict[str, Any]) -> str:
-    status = _ORDER_STATUS_PT.get(order["status"], order["status"])
-    return f"o pedido de {_money(order['total_brl'])} está {status}"
+    status = _word('order_status', order['status'])
+    return pick(
+        f"o pedido de {_money(order['total_brl'])} está {status}",
+        f"the {_money(order['total_brl'])} order is {status}",
+    )
 
 
 def get_order(order_id: str) -> dict[str, Any]:
@@ -207,13 +222,17 @@ def get_order(order_id: str) -> dict[str, Any]:
     # carries every identifier, so the trace and any caller that wants the
     # structure keep exactly what they had.
     who = _customer_name(order["customer_id"])
-    status = _ORDER_STATUS_PT.get(order["status"], order["status"])
-    summary = (
+    status = _word('order_status', order['status'])
+    summary = pick(
         f"O pedido de {who}, no valor de {_money(order['total_brl'])}, "
-        f"está {status}."
+        f"está {status}.",
+        f"{who}'s order, worth {_money(order['total_brl'])}, is {status}.",
     )
     if order.get("tracking") and order["status"] in ("shipped", "delivered"):
-        summary += f" Código de rastreio: {order['tracking']}."
+        summary += pick(
+            f" Código de rastreio: {order['tracking']}.",
+            f" Tracking code: {order['tracking']}.",
+        )
     return {"found": True, "order": result, "summary": summary}
 
 
@@ -222,13 +241,15 @@ def get_customer(customer_id: str) -> dict[str, Any]:
     customer = _customers.get(customer_id)
     if customer is None:
         return {"found": False, "customer_id": customer_id}
-    tier = _TIER_PT.get(customer["tier"], customer["tier"])
+    tier = _word('tier', customer['tier'])
     return {
         "found": True,
         "customer": copy.deepcopy(customer),
-        "summary": (
+        "summary": pick(
             f"{customer['name']} é cliente do segmento {tier}, "
-            f"de {customer['city']}, desde {customer['since']}."
+            f"de {customer['city']}, desde {customer['since']}.",
+            f"{customer['name']} is a {tier} customer from "
+            f"{customer['city']}, since {customer['since']}.",
         ),
     }
 
@@ -250,15 +271,22 @@ def list_customer_orders(customer_id: str) -> dict[str, Any]:
     )
     who = _customer_name(customer_id)
     if not matches:
-        summary = f"{who} não tem pedidos registrados."
+        summary = pick(
+            f"{who} não tem pedidos registrados.",
+            f"{who} has no recorded orders.",
+        )
     else:
         total = sum(o["total_brl"] for o in matches)
         listed = "; ".join(_order_phrase(o) for o in matches[:3])
-        more = "" if len(matches) <= 3 else f" e mais {len(matches) - 3}"
-        summary = (
+        rest = len(matches) - 3
+        more = "" if len(matches) <= 3 else pick(f" e mais {rest}", f" and {rest} more")
+        summary = pick(
             f"{who} tem {len(matches)} "
             f"{'pedido' if len(matches) == 1 else 'pedidos'}, somando "
-            f"{_money(total)}. Os mais recentes: {listed}{more}."
+            f"{_money(total)}. Os mais recentes: {listed}{more}.",
+            f"{who} has {len(matches)} "
+            f"{'order' if len(matches) == 1 else 'orders'}, totalling "
+            f"{_money(total)}. Most recent: {listed}{more}.",
         )
     return {
         "found": True,
@@ -323,27 +351,44 @@ def find_customer(name: str) -> dict[str, Any]:
             break
 
     if not matches:
-        summary = f"Nenhum cliente encontrado com o nome “{name}”."
+        summary = pick(
+            f"Nenhum cliente encontrado com o nome “{name}”.",
+            f"No customer found by the name “{name}”.",
+        )
     else:
         first = matches[0]
-        tier = _TIER_PT.get(first["tier"], first["tier"])
-        summary = (
-            f"{first['name']} é cliente do segmento {tier}, de {first['city']}."
+        tier = _word('tier', first['tier'])
+        summary = pick(
+            f"{first['name']} é cliente do segmento {tier}, de {first['city']}.",
+            f"{first['name']} is a {tier} customer from {first['city']}.",
         )
         orders = first.get("orders") or []
         if orders:
             total = sum(o["total_brl"] for o in orders)
             listed = "; ".join(_order_phrase(o) for o in orders[:3])
-            more = "" if len(orders) <= 3 else f" e mais {len(orders) - 3}"
-            summary += (
+            rest = len(orders) - 3
+            more = "" if len(orders) <= 3 else pick(
+                f" e mais {rest}", f" and {rest} more"
+            )
+            summary += pick(
                 f" Tem {len(orders)} "
                 f"{'pedido' if len(orders) == 1 else 'pedidos'}, somando "
-                f"{_money(total)}: {listed}{more}."
+                f"{_money(total)}: {listed}{more}.",
+                f" Has {len(orders)} "
+                f"{'order' if len(orders) == 1 else 'orders'}, totalling "
+                f"{_money(total)}: {listed}{more}.",
             )
         else:
-            summary += " Ainda não tem pedidos registrados."
+            summary += pick(
+                " Ainda não tem pedidos registrados.",
+                " No orders recorded yet.",
+            )
         if len(matches) > 1:
-            summary += f" Outros {len(matches) - 1} cliente(s) também correspondem."
+            others = len(matches) - 1
+            summary += pick(
+                f" Outros {others} cliente(s) também correspondem.",
+                f" {others} other customer(s) also match.",
+            )
 
     return {
         "found": bool(matches),
@@ -358,15 +403,21 @@ def get_ticket(ticket_id: str) -> dict[str, Any]:
     ticket = _tickets.get(ticket_id)
     if ticket is None:
         return {"found": False, "ticket_id": ticket_id}
-    status = _TICKET_STATUS_PT.get(ticket["status"], ticket["status"])
-    priority = _PRIORITY_PT.get(ticket["priority"], ticket["priority"])
-    summary = (
+    status = _word('ticket_status', ticket['status'])
+    priority = _word('priority', ticket['priority'])
+    summary = pick(
         f"Chamado de {_customer_name(ticket['customer_id'])} sobre "
         f"\"{ticket['subject']}\": está {status}, prioridade {priority}, "
-        f"aberto em {ticket['opened_on']}."
+        f"aberto em {ticket['opened_on']}.",
+        f"Ticket from {_customer_name(ticket['customer_id'])} about "
+        f"\"{ticket['subject']}\": it is {status}, {priority} priority, "
+        f"opened on {ticket['opened_on']}.",
     )
     if ticket.get("resolution"):
-        summary += f" Resolução: {ticket['resolution']}"
+        summary += pick(
+            f" Resolução: {ticket['resolution']}",
+            f" Resolution: {ticket['resolution']}",
+        )
     return {"found": True, "ticket": copy.deepcopy(ticket), "summary": summary}
 
 

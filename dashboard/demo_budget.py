@@ -37,6 +37,8 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Protocol
 
+from i18n import t
+
 #: Google's free tier for the configured model, per project per day.
 FREE_TIER_DAILY_CALLS = 500
 
@@ -134,15 +136,6 @@ def calls_used_today(repository: _Repository) -> int:
     return used
 
 
-EXHAUSTED_MESSAGE = (
-    "**A capacidade de hoje foi gasta.** Esta demonstração define o "
-    "próprio limite diário de chamadas ao provedor de IA, e o sistema "
-    "parou *antes* de fazer mais uma.\n\n"
-    "O provedor está de pé e nada quebrou — este ambiente apenas escolheu "
-    "não gastar mais hoje. A simulação determinística segue inteira: mesmo "
-    "grafo de orquestração, mesmo motor de políticas, mesmos controles de "
-    "segurança."
-)
 
 
 def _status_for(used: int, budget: int) -> BudgetStatus:
@@ -170,12 +163,7 @@ def budget_state(repository: _Repository, *, live: bool) -> BudgetState:
             budget=LIVE_CALL_BUDGET,
             status=status,
             gating=False,
-            message=(
-                f"{used} de {LIVE_CALL_BUDGET} chamadas de modelo hoje. Em "
-                "modo simulação elas são locais e não consomem cota de "
-                "provedor nenhum; o contador é real e o limite só passa a "
-                "valer em modo live."
-            ),
+            message=t("budget.simulation", used=used, budget=LIVE_CALL_BUDGET),
         )
 
     if status is BudgetStatus.EXHAUSTED:
@@ -184,20 +172,19 @@ def budget_state(repository: _Repository, *, live: bool) -> BudgetState:
             budget=LIVE_CALL_BUDGET,
             status=status,
             gating=True,
-            message=EXHAUSTED_MESSAGE,
+            message=t("budget.exhausted"),
         )
 
     requests = remaining // TYPICAL_CALLS_PER_REQUEST
     if status is BudgetStatus.RUNNING_LOW:
-        message = (
-            f"**A capacidade da demonstração está acabando.** Restam "
-            f"{remaining} de {LIVE_CALL_BUDGET} chamadas ao provedor hoje, "
-            f"cerca de {requests} requisições."
+        message = t(
+            "budget.running_low",
+            remaining=remaining, budget=LIVE_CALL_BUDGET, requests=requests,
         )
     else:
-        message = (
-            f"Modo live. Restam {remaining} de {LIVE_CALL_BUDGET} chamadas ao "
-            f"provedor no limite de hoje, cerca de {requests} requisições."
+        message = t(
+            "budget.live_ok",
+            remaining=remaining, budget=LIVE_CALL_BUDGET, requests=requests,
         )
 
     return BudgetState(

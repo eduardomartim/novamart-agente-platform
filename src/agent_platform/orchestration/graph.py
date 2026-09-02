@@ -38,6 +38,7 @@ from ..guardrails.input import InputAssessment
 from ..guardrails.output import secure_output
 from ..guardrails.policy import Confirmation
 from ..guardrails.rules import action_fingerprint
+from ..i18n import pick
 from ..llm.budget import ProviderBudgetExhausted
 from ..llm.circuit import CircuitOpenError
 from ..llm.provider import LLMError
@@ -560,9 +561,15 @@ def _compose_response(state: AgentState) -> tuple[str, str]:
     # and reporting `success` here is how an unanswerable question came back
     # looking answered. The status says so and the sentence says why.
     return (
-        "Não consigo responder essa pergunta com os dados e as ferramentas "
-        "disponíveis nesta demonstração. Consigo consultar clientes, pedidos, "
-        "tickets e a base de conhecimento — inclusive totais e rankings.",
+        pick(
+            "Não consigo responder essa pergunta com os dados e as ferramentas "
+            "disponíveis nesta demonstração. Consigo consultar clientes, "
+            "pedidos, tickets e a base de conhecimento — inclusive totais e "
+            "rankings.",
+            "I cannot answer that question with the data and tools available "
+            "in this demo. I can look up customers, orders, tickets and the "
+            "knowledge base — including totals and rankings.",
+        ),
         "declined",
     )
 
