@@ -57,14 +57,93 @@ def _offered_tools(prompt: str) -> set[str]:
 #:
 #: Ordered most-specific-first for the same reason as the table below: "which
 #: customer placed the most orders" is a ranking, not an order listing.
+#: Subjects this dataset has no record of. Checked before anything else so a
+#: question about them is declined rather than served by whichever tool happens
+#: to share a word with it -- "how many orders were refunded?" used to match
+#: `list_orders` and come back with all forty, which is a confident answer to a
+#: question nobody asked. There is no refund entity, no stock level, no cost
+#: and no delivery deadline in the data; inventing any of them to look complete
+#: is the failure this table exists to prevent.
+# Matched on word boundaries, not as substrings. "custo" -- Portuguese for
+# cost -- sits inside the English "customers", so a substring test refused
+# "How many customers do we have?", a question three tools can answer.
+#
+# Cost itself is no longer listed. The catalogue carries `unit_price_brl`, so
+# "how much does this product cost?" is answerable and must not be refused;
+# what the dataset genuinely lacks is what you would subtract from that price,
+# which is why margin and profit stay.
+# The exemption, and the reason the guard above is not simply "the word
+# refund appears". The knowledge base holds a *Refund policy* article and a
+# *Returns process* one, so "what is the refund policy?" is answerable from a
+# document even though no refund record exists to count. Blanket-refusing the
+# word broke that question, and the retrieval suites that depend on it, in
+# twelve places at once.
+#
+# The distinction is what is being asked for: a rule, which is written down,
+# versus a transaction, which is not.
+_DOCUMENTED_SUBJECTS = re.compile(
+    r"\b(?:polic(?:y|ies)|pol[íi]ticas?|procedures?|procedimentos?"
+    r"|rules?|regras?|how (?:do|can) i|como (?:fa[çc]o|posso))\b",
+    re.IGNORECASE,
+)
+
+_UNSUPPORTED_SUBJECTS = re.compile(
+    r"\b(?:"
+    r"refund\w*|reembols\w*|estorn\w*"
+    r"|stocks?|inventor(?:y|ies)|estoques?|invent[áa]rios?"
+    r"|profit\w*|margins?|marge(?:m|ns)|lucros?"
+    r")\b",
+    re.IGNORECASE,
+)
+
 _AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "product_price_range",
+        (
+            "most expensive", "cheapest", "priciest", "dearest", "price range",
+            "mais caro", "mais barato", "faixa de pre", "preço médio",
+            "highest price", "lowest price", "maior preço", "menor preço",
+        ),
+    ),
+    (
+        "top_selling_products",
+        (
+            "sells the most", "best seller", "best-selling", "most sold",
+            "top product", "sells best", "mais vendido", "mais vende",
+            "produtos mais vendidos",
+            # Asked about money rather than volume. Listed here rather than
+            # under `revenue_total` because this table is ordered and this
+            # entry is checked first: "which product generated the most
+            # revenue" is a ranking, not a company total.
+            "most revenue", "generated the most", "mais receita",
+            "gerou mais", "produto que mais",
+        ),
+    ),
+    (
+        "count_products",
+        (
+            "how many product", "number of products", "product count",
+            "quantos produto", "quantidade de produto", "total de produto",
+            "how many items do we sell",
+        ),
+    ),
+    (
+        "list_products",
+        (
+            "which products", "what products", "list products", "our catalogue",
+            "our catalog", "product catalogue", "each product cost",
+            "products do we sell", "quais produto", "que produtos",
+            "catálogo", "preço de cada", "quanto custa cada",
+        ),
+    ),
     (
         "business_overview",
         (
             "needs attention", "need attention", "should i know", "should i be aware",
             "any problem", "anything wrong", "manager", "deveria conhecer",
+            "overview", "panorama", "summary of", "how is the business",
             "precisa de atencao", "precisa de atenção", "algum problema",
-            "gestor", "resumo do negocio", "resumo do negócio",
+            "gestor", "resumo do negocio", "resumo do negócio", "visão geral",
         ),
     ),
     (
@@ -72,8 +151,9 @@ _AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "top customer", "best customer", "biggest customer", "most orders",
             "most purchases", "most valuable", "who buys", "buys the most",
+            "bought the most", "biggest spender", "spends the most",
             "principais client", "melhores client", "maiores client",
-            "mais pedidos", "mais compras", "mais comprou",
+            "mais pedidos", "mais compras", "mais comprou", "mais gastou",
         ),
     ),
     (
@@ -88,6 +168,8 @@ _AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "revenue_total",
         (
             "total value", "total revenue", "total sales", "how much revenue",
+            "how much have we sold", "how much did we sell", "revenue",
+            "average order", "avg order", "ticket médio", "valor médio",
             "valor total", "faturamento", "receita total", "total em pedidos",
         ),
     ),
@@ -95,8 +177,14 @@ _AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "open_tickets",
         (
             "urgent ticket", "open ticket", "unresolved ticket", "any ticket",
+            "high priority ticket", "high-priority ticket", "priority ticket",
+            "customers have ticket", "clientes com ticket", "quais clientes têm",
             "support load", "tickets abertos", "ticket urgente",
-            "chamados abertos", "tickets em aberto",
+            "chamados abertos", "tickets em aberto", "alta prioridade",
+            # The verb moves. "tickets abertos" missed "quantos tickets
+            # estão abertos?", which is how the question is usually typed.
+            "quantos tickets", "tickets estão", "chamados estão",
+            "how many tickets",
         ),
     ),
     (
@@ -109,6 +197,16 @@ _AGGREGATE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "recent order", "latest order", "open orders", "orders are open",
             "how many orders", "pedidos recentes", "pedidos em aberto",
             "quantos pedidos", "ultimos pedidos", "últimos pedidos",
+            "orders are delivered", "delivered orders", "orders are pending",
+            "pending order", "cancelled order", "pedidos entregues",
+            "pedidos pendentes", "pedidos cancelados",
+            # Passive and plural only. A bare "cancel" stem here would
+            # swallow "cancel order ORD-1001", turning a write request the
+            # platform is supposed to refuse in public into a quiet read.
+            "orders were cancelled", "orders were delivered",
+            "orders were returned", "pedidos foram cancelados",
+            "pedidos foram entregues", "pedidos estão em aberto",
+            "pedidos estão abertos", "pedidos abertos",
         ),
     ),
 )
@@ -212,6 +310,15 @@ class StubProvider:
         * or it is a knowledge-base question, which `search` always accepts.
         """
         lowered = request.lower()
+        # First, and before anything can match on a shared word: a subject the
+        # dataset has no record of is unanswerable however familiar the rest of
+        # the sentence looks. "How many orders were refunded?" contains
+        # "orders"; serving it from `list_orders` reported all forty as though
+        # they had been refunded.
+        if _UNSUPPORTED_SUBJECTS.search(request) and not _DOCUMENTED_SUBJECTS.search(
+            request
+        ):
+            return False
         if any(
             keyword in lowered
             for _tool, keywords in _AGGREGATE_KEYWORDS
@@ -288,6 +395,13 @@ class StubProvider:
             # phrasing it as a question. Checked after the write words, so an
             # instruction to change something is still an action.
             "tell me", "me fale", "fale sobre",
+            # And so is "give me an overview" -- an imperative with no question
+            # mark and no lookup noun, which fell through to direct_response
+            # and was refused although `business_overview` answers it. Routing
+            # here still passes through `_servable`, so an imperative nothing
+            # can serve is refused exactly as before.
+            "give me", "overview", "panorama", "resumo", "visão geral",
+            "visao geral", "me dê", "quero saber",
         )
 
         is_question = lowered.endswith("?") or lowered.startswith(question_openers)
@@ -322,6 +436,15 @@ class StubProvider:
         offered = _offered_tools(prompt)
 
         matched: str | None = None
+
+        # The same guard the router applies. Reached when a request carrying an
+        # identifier also mentions an unsupported subject -- "was ORD-1001
+        # refunded?" -- where the identifier alone would otherwise make it look
+        # answerable.
+        if _UNSUPPORTED_SUBJECTS.search(request) and not _DOCUMENTED_SUBJECTS.search(
+            request
+        ):
+            return "search", {"query": request[:200]}
 
         # Aggregate intents first. A question about the whole set must never be
         # served by a tool that reads one row: that is how "how many customers
@@ -388,16 +511,53 @@ class StubProvider:
     def _arguments_for(tool: str, prompt: str) -> dict[str, Any]:
         if tool == "list_orders":
             lowered = prompt.lower()
+            # Named statuses first. Without them "which orders are delivered?"
+            # fell through to the unfiltered branch and answered "40 orders in
+            # total" -- true of the dataset, and not an answer to the question.
+            for words, status in (
+                (("delivered", "entregue"), "delivered"),
+                (("pending", "processing", "pendente", "em processamento"),
+                 "processing"),
+                (("shipped", "enviado", "despachado"), "shipped"),
+                (("cancel",), "cancelled"),
+                (("returned", "devolvid"), "returned"),
+            ):
+                if any(word in lowered for word in words):
+                    return {"status": status}
             if any(
                 word in lowered
                 for word in ("delayed", "late", "overdue", "open", "atrasad", "aberto")
             ):
                 return {"status": "open"}
-            if "cancel" in lowered:
-                return {"status": "cancelled"}
             return {}
-        if tool in ("count_customers", "revenue_total", "open_tickets",
-                    "business_overview"):
+        if tool == "open_tickets":
+            lowered = prompt.lower()
+            if "high priority" in lowered or "high-priority" in lowered or (
+                "alta prioridade" in lowered
+            ):
+                return {"priority": "high"}
+            return {}
+        if tool == "list_products":
+            lowered = prompt.lower()
+            for key, label in (
+                ("periferic", "peripherals"), ("peripheral", "peripherals"),
+                ("acessori", "accessories"), ("accessor", "accessories"),
+                ("monitor", "displays"), ("display", "displays"),
+                ("audio", "audio"), ("áudio", "audio"),
+                ("mobili", "furniture"), ("furniture", "furniture"),
+                ("armazena", "storage"), ("storage", "storage"),
+            ):
+                if key in lowered:
+                    return {"category": label}
+            return {}
+        if tool == "top_selling_products":
+            lowered = prompt.lower()
+            by_revenue = any(
+                w in lowered for w in ("revenue", "receita", "faturamento", "valor")
+            )
+            return {"by": "revenue"} if by_revenue else {"by": "units"}
+        if tool in ("count_customers", "revenue_total", "count_products",
+                    "product_price_range", "business_overview"):
             return {}
         if tool == "top_customers":
             lowered = prompt.lower()

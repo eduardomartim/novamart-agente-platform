@@ -59,6 +59,10 @@ def test_permitted_names_match_the_matrix(registry):
         "top_customers",
         "open_tickets",
         "business_overview",
+        "count_products",
+        "list_products",
+        "product_price_range",
+        "top_selling_products",
     }
     executor = set(registry.permitted_names(AgentName.EXECUTOR))
     assert "update_record" in executor and "send_email" in executor

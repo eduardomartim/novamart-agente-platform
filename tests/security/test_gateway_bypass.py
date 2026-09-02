@@ -37,6 +37,13 @@ SAMPLES = {
     "top_customers": {},
     "open_tickets": {},
     "business_overview": {},
+    # The catalogue reads. Products were visible in the dashboard and reachable
+    # by no tool at all; these close that gap and refuse a direct call like
+    # every other handler.
+    "count_products": {},
+    "list_products": {},
+    "product_price_range": {},
+    "top_selling_products": {},
 }
 
 

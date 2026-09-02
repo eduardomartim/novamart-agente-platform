@@ -70,6 +70,17 @@ TICKET_STATUS_LABELS: Final[dict[str, str]] = {
     "escalated": "escalados",
 }
 
+#: Catalogue categories, in the words a reader uses. The dataset stores the
+#: English key; only the sentence changes.
+CATEGORY_LABELS: Final[dict[str, str]] = {
+    "peripherals": "periféricos",
+    "accessories": "acessórios",
+    "displays": "monitores",
+    "audio": "áudio",
+    "furniture": "mobiliário",
+    "storage": "armazenamento",
+}
+
 #: Order-status labels for the same reason.
 STATUS_LABELS: Final[dict[str, str]] = {
     "processing": "em processamento",
@@ -88,6 +99,18 @@ def _brl(value: float) -> str:
 
 def _plural(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
+
+
+#: Priority in the words a reader uses.
+_PRIORITY_LABELS: Final[dict[str, str]] = {
+    "high": "alta", "normal": "normal", "low": "baixa",
+}
+
+
+def _customer_of(ticket: dict[str, Any]) -> str:
+    """The person a ticket belongs to, by name rather than by identifier."""
+    customer = data.CUSTOMERS.get(ticket.get("customer_id", ""))
+    return customer["name"] if customer else str(ticket.get("customer_id", "—"))
 
 
 # ------------------------------------------------------------------ arguments
@@ -125,6 +148,37 @@ class TopCustomersArgs(BaseModel):
     )
 
 
+class ListProductsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Constrained to the categories the catalogue actually uses, for the same
+    #: reason `ListOrdersArgs.status` is: an unknown value is a validation
+    #: failure, not an empty list that reads like "we sell none of those".
+    category: (
+        Literal["peripherals", "accessories", "displays", "audio", "furniture", "storage"]
+        | None
+    ) = Field(default=None, description="Filter by product category.")
+    limit: int = Field(default=15, ge=1, le=15)
+
+
+class OpenTicketsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    priority: Literal["high", "normal", "low"] | None = Field(
+        default=None, description="Filter by ticket priority."
+    )
+
+
+class TopSellingProductsArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(default=5, ge=1, le=15)
+    by: Literal["units", "revenue"] = Field(
+        default="units",
+        description="Rank by units sold, or by the revenue those units produced.",
+    )
+
+
 # ---------------------------------------------------------------- the handlers
 
 
@@ -150,6 +204,136 @@ def count_customers() -> dict[str, Any]:
     }
 
 
+def count_products() -> dict[str, Any]:
+    """How many products the catalogue holds, and in which categories."""
+    require_gateway("count_products")
+    by_category: dict[str, int] = {}
+    for product in data.PRODUCTS.values():
+        by_category[product["category"]] = by_category.get(product["category"], 0) + 1
+
+    total = len(data.PRODUCTS)
+    parts = ", ".join(
+        f"{count} em {CATEGORY_LABELS.get(category, category)}"
+        for category, count in sorted(by_category.items(), key=lambda kv: -kv[1])
+    )
+    return {
+        "found": True,
+        "total": total,
+        "by_category": by_category,
+        "summary": f"O catálogo tem {total} produtos: {parts}.",
+    }
+
+
+def list_products(category: str | None = None, limit: int = 15) -> dict[str, Any]:
+    """The catalogue, optionally narrowed to one category.
+
+    Price is the catalogue price. The dataset records no cost and no stock
+    level, so neither margin nor availability is reported here -- see the note
+    at the top of this module.
+    """
+    require_gateway("list_products")
+    products = sorted(data.PRODUCTS.values(), key=lambda p: p["name"])
+    if category:
+        selected = [p for p in products if p["category"] == category]
+        described = f"na categoria {CATEGORY_LABELS.get(category, category)}"
+    else:
+        selected = products
+        described = "no catálogo"
+
+    if not selected:
+        summary = f"Nenhum produto {described}."
+    else:
+        named = "; ".join(
+            f"{p['name']} ({_brl(p['unit_price_brl'])})" for p in selected[:limit]
+        )
+        more = "" if len(selected) <= limit else f" e mais {len(selected) - limit}"
+        summary = (
+            f"{len(selected)} {_plural(len(selected), 'produto', 'produtos')} "
+            f"{described}: {named}{more}."
+        )
+
+    return {
+        "found": True,
+        "category_filter": category,
+        "matched": len(selected),
+        "products": [
+            {
+                "name": p["name"],
+                "category": p["category"],
+                "unit_price_brl": p["unit_price_brl"],
+                "warranty_months": p["warranty_months"],
+                "sku": p["sku"],
+            }
+            for p in selected[:limit]
+        ],
+        "summary": summary,
+    }
+
+
+def product_price_range() -> dict[str, Any]:
+    """The cheapest and most expensive products, and the average between them."""
+    require_gateway("product_price_range")
+    products = list(data.PRODUCTS.values())
+    if not products:
+        return {"found": True, "summary": "O catálogo está vazio."}
+
+    cheapest = min(products, key=lambda p: p["unit_price_brl"])
+    dearest = max(products, key=lambda p: p["unit_price_brl"])
+    average = sum(p["unit_price_brl"] for p in products) / len(products)
+    return {
+        "found": True,
+        "cheapest": {"name": cheapest["name"], "unit_price_brl": cheapest["unit_price_brl"]},
+        "most_expensive": {"name": dearest["name"], "unit_price_brl": dearest["unit_price_brl"]},
+        "average_price_brl": round(average, 2),
+        "summary": (
+            f"O produto mais caro é {dearest['name']}, a "
+            f"{_brl(dearest['unit_price_brl'])}; o mais barato é "
+            f"{cheapest['name']}, a {_brl(cheapest['unit_price_brl'])}. "
+            f"O preço médio do catálogo é {_brl(average)}."
+        ),
+    }
+
+
+def top_selling_products(limit: int = 5, by: str = "units") -> dict[str, Any]:
+    """What actually sold, counted from the order lines themselves.
+
+    Derived from `ORDERS.items`, which is where quantity lives -- the product
+    catalogue records no sales figures of its own, so this is a count of what
+    happened rather than a stored total.
+    """
+    require_gateway("top_selling_products")
+    tally: dict[str, dict[str, Any]] = {}
+    for order in data.ORDERS.values():
+        for line in order["items"]:
+            entry = tally.setdefault(line["name"], {"units": 0, "revenue": 0.0})
+            entry["units"] += line["quantity"]
+            entry["revenue"] += line["line_total_brl"]
+
+    if not tally:
+        return {"found": True, "products": [], "summary": "Nenhum item vendido ainda."}
+
+    ranked = sorted(tally.items(), key=lambda kv: (kv[1][by], kv[1]["units"]), reverse=True)
+    rows = [
+        {"name": name, "units": stats["units"], "revenue_brl": round(stats["revenue"], 2)}
+        for name, stats in ranked[:limit]
+    ]
+    lead = rows[0]
+    if by == "revenue":
+        listed = ", ".join(f"{r['name']} ({_brl(r['revenue_brl'])})" for r in rows)
+        summary = (
+            f"{lead['name']} é o produto que mais gerou receita: "
+            f"{_brl(lead['revenue_brl'])} em {lead['units']} unidades. "
+            f"Os principais por receita: {listed}."
+        )
+    else:
+        listed = ", ".join(f"{r['name']} ({r['units']} un.)" for r in rows)
+        summary = (
+            f"{lead['name']} é o produto mais vendido, com {lead['units']} "
+            f"unidades. Os principais por volume: {listed}."
+        )
+    return {"found": True, "ranked_by": by, "products": rows, "summary": summary}
+
+
 def revenue_total() -> dict[str, Any]:
     """Total booked value, and how much of it was cancelled or returned."""
     require_gateway("revenue_total")
@@ -161,16 +345,21 @@ def revenue_total() -> dict[str, Any]:
         if order["status"] in ("cancelled", "returned")
     )
     net = total - lost
+    # "What is the average order value?" reaches this tool, and the sentence
+    # used to report the total without ever stating the average -- a confident
+    # reply to a question it had not answered.
+    average = total / len(orders) if orders else 0.0
     return {
         "found": True,
         "order_count": len(orders),
         "total_brl": round(total, 2),
         "cancelled_or_returned_brl": round(lost, 2),
         "net_brl": round(net, 2),
+        "average_order_brl": round(average, 2),
         "summary": (
-            f"Os {len(orders)} pedidos somam {_brl(total)}. Descontando "
-            f"cancelamentos e devoluções ({_brl(lost)}), o valor efetivo é "
-            f"{_brl(net)}."
+            f"Os {len(orders)} pedidos somam {_brl(total)}, uma média de "
+            f"{_brl(average)} por pedido. Descontando cancelamentos e "
+            f"devoluções ({_brl(lost)}), o valor efetivo é {_brl(net)}."
         ),
     }
 
@@ -301,8 +490,14 @@ def top_customers(limit: int = 5, by: str = "revenue") -> dict[str, Any]:
     }
 
 
-def open_tickets() -> dict[str, Any]:
-    """Support tickets nobody has closed yet, worst first."""
+def open_tickets(priority: str | None = None) -> dict[str, Any]:
+    """Support tickets nobody has closed yet, worst first.
+
+    Each row now carries the customer's name. It used to report only the
+    subject, which meant "which customers have tickets?" had no tool that could
+    answer it even though the link exists in the data: every ticket carries a
+    `customer_id`.
+    """
     require_gateway("open_tickets")
     rank = {"high": 0, "normal": 1, "low": 2}
     unresolved = [
@@ -310,11 +505,27 @@ def open_tickets() -> dict[str, Any]:
         for ticket in data.TICKETS.values()
         if ticket["status"] in UNRESOLVED_TICKET_STATUSES
     ]
+    if priority:
+        unresolved = [t for t in unresolved if t["priority"] == priority]
     unresolved.sort(key=lambda t: (rank.get(t["priority"], 3), t["ticket_id"]))
     high = [t for t in unresolved if t["priority"] == "high"]
 
     if not unresolved:
-        summary = "Não há tickets em aberto no momento."
+        summary = (
+            f"Não há tickets em aberto de prioridade "
+            f"{_PRIORITY_LABELS.get(priority, priority)}."
+            if priority
+            else "Não há tickets em aberto no momento."
+        )
+    elif priority:
+        nomes = sorted({_customer_of(t) for t in unresolved})
+        summary = (
+            f"{len(unresolved)} "
+            f"{_plural(len(unresolved), 'ticket', 'tickets')} de prioridade "
+            f"{_PRIORITY_LABELS.get(priority, priority)} em aberto, "
+            f"de {len(nomes)} {_plural(len(nomes), 'cliente', 'clientes')}: "
+            f"{', '.join(nomes)}."
+        )
     else:
         # Says what was counted. The dashboard's own KPI counts only the
         # `open` status, so "9 tickets em aberto" beside a card reading 7 would
@@ -337,13 +548,24 @@ def open_tickets() -> dict[str, Any]:
             )
         else:
             summary += ", nenhum de alta prioridade."
+        # Who they belong to. The names were already in the payload and only
+        # the subjects were spoken, so "which customers have tickets?" got a
+        # list of complaints and no customer.
+        nomes = sorted({_customer_of(t) for t in unresolved})
+        summary += (
+            f" Os tickets são de {len(nomes)} "
+            f"{_plural(len(nomes), 'cliente', 'clientes')}: {', '.join(nomes)}."
+        )
 
     return {
         "found": True,
+        "priority_filter": priority,
         "open_count": len(unresolved),
         "high_priority_count": len(high),
+        "customers": sorted({_customer_of(t) for t in unresolved}),
         "tickets": [
             {
+                "customer": _customer_of(ticket),
                 "subject": ticket["subject"],
                 "priority": ticket["priority"],
                 "status": ticket["status"],
@@ -462,13 +684,66 @@ ANALYTICS_TOOL_DEFINITIONS: Final[tuple[ToolDefinition, ...]] = (
     ToolDefinition(
         name="open_tickets",
         description=(
-            "Support tickets that are not resolved, highest priority first. Use "
-            "for urgent tickets and open support load."
+            "Support tickets that are not resolved, highest priority first, "
+            "each with the customer it belongs to. Optionally filtered by "
+            "priority. Use for urgent tickets, high-priority tickets, open "
+            "support load, and which customers have tickets."
+        ),
+        risk_level=RiskLevel.LOW,
+        capability=Capability.READ_DATA,
+        parameters=OpenTicketsArgs,
+        handler=open_tickets,
+        allowed_agents=_READERS,
+    ),
+    ToolDefinition(
+        name="count_products",
+        description=(
+            "Count the products in the catalogue and break them down by "
+            "category. Use for 'how many products do we have?'."
         ),
         risk_level=RiskLevel.LOW,
         capability=Capability.READ_DATA,
         parameters=NoArgs,
-        handler=open_tickets,
+        handler=count_products,
+        allowed_agents=_READERS,
+    ),
+    ToolDefinition(
+        name="list_products",
+        description=(
+            "List the catalogue with each product's price, optionally filtered "
+            "by category. Use for 'which products do we sell?' and 'how much "
+            "does each product cost?'. The dataset records no stock level and "
+            "no cost, so neither is reported."
+        ),
+        risk_level=RiskLevel.LOW,
+        capability=Capability.READ_DATA,
+        parameters=ListProductsArgs,
+        handler=list_products,
+        allowed_agents=_READERS,
+    ),
+    ToolDefinition(
+        name="product_price_range",
+        description=(
+            "The cheapest product, the most expensive one, and the catalogue "
+            "average. Use for questions about the priciest or cheapest item."
+        ),
+        risk_level=RiskLevel.LOW,
+        capability=Capability.READ_DATA,
+        parameters=NoArgs,
+        handler=product_price_range,
+        allowed_agents=_READERS,
+    ),
+    ToolDefinition(
+        name="top_selling_products",
+        description=(
+            "Rank products by units sold or by the revenue they produced, "
+            "counted from the order lines. Use for 'which product sells the "
+            "most?' and best sellers."
+        ),
+        risk_level=RiskLevel.LOW,
+        capability=Capability.READ_DATA,
+        parameters=TopSellingProductsArgs,
+        handler=top_selling_products,
         allowed_agents=_READERS,
     ),
     ToolDefinition(
