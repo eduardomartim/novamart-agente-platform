@@ -33,7 +33,12 @@ from .llm import LLMProvider, build_provider, describe_provider
 from .llm.circuit import CircuitBreaker
 from .llm.provider import LLMError, ProviderInfo
 from .observability.events import EventStatus, EventType
-from .observability.tracing import Tracer, new_request_id, new_trace_id
+from .observability.tracing import (
+    EventObserver,
+    Tracer,
+    new_request_id,
+    new_trace_id,
+)
 from .orchestration.graph import GraphDeps, build_graph
 from .orchestration.state import initial_state
 from .persistence.repository import Repository, RequestRecord
@@ -434,7 +439,13 @@ class AgentPlatform:
 
     # ---------------------------------------------------------------------- run
 
-    def run(self, user_input: str, *, quota_key: str | None = None) -> RunResult:
+    def run(
+        self,
+        user_input: str,
+        *,
+        quota_key: str | None = None,
+        on_event: EventObserver | None = None,
+    ) -> RunResult:
         """Process one user request.
 
         ``quota_key`` names the rate-limit bucket this request spends from.
@@ -448,11 +459,19 @@ class AgentPlatform:
         handed down as a parameter, because the policy engine consults the
         limiter from inside the graph, through a call site with no access to
         the caller. See ``security.rate_limit.quota_scope``.
+
+        ``on_event`` is notified as each event is recorded, so a caller running
+        this synchronously can say what is happening while it happens. It is
+        optional, it is handed identifiers rather than prose, and it cannot
+        fail the request: see :class:`~agent_platform.observability.tracing.Tracer`.
+        Every existing caller passes nothing and is unaffected.
         """
         with quota_scope(quota_key):
-            return self._run(user_input)
+            return self._run(user_input, on_event=on_event)
 
-    def _run(self, user_input: str) -> RunResult:
+    def _run(
+        self, user_input: str, *, on_event: EventObserver | None = None
+    ) -> RunResult:
         request_id = new_request_id()
         trace_id = new_trace_id()
         started = time.perf_counter()
@@ -463,6 +482,7 @@ class AgentPlatform:
             trace_id=trace_id,
             max_payload_chars=self.settings.max_trace_payload_chars,
             known_secrets=self._known_secrets,
+            observer=on_event,
         )
         tracer.event(
             EventType.REQUEST_STARTED,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -258,6 +259,15 @@ class BaseAgent(ABC):
         purpose: Purpose,
         response_schema: dict[str, Any] | None = None,
     ) -> LLMResponse:
+        # Everything from here to the provider call is preflight: egress
+        # scrubbing, cost authorisation, the per-request resource ceiling and
+        # the circuit breaker. None of it was timed, and the gap it hides is
+        # not small -- two recorded requests spent thirty-odd seconds between
+        # `agent_started` and `llm_call` while the model call itself took under
+        # two seconds, and no event accounted for the difference. Measuring it
+        # is the only way to find out which of these four is responsible.
+        preflight_started = time.perf_counter()
+
         # Egress control runs first: nothing leaves the process, and nothing is
         # even costed, until credentials have been stripped out of the prompt.
         egress = prepare_for_egress(prompt, known_secrets=self.deps.known_secrets)
@@ -324,6 +334,8 @@ class BaseAgent(ABC):
                 )
                 raise LLMUnavailableError(str(exc)) from exc
 
+        preflight_ms = (time.perf_counter() - preflight_started) * 1000.0
+
         # The provider is third-party code and may raise anything its SDK
         # happens to raise. Normalising unexpected exceptions into a typed
         # platform error here -- at the trust boundary -- keeps provider
@@ -379,6 +391,13 @@ class BaseAgent(ABC):
                 "output_tokens": response.output_tokens,
                 "estimated_cost_usd": str(tracked.cost_usd),
                 "tokens_estimated": response.tokens_estimated,
+                # What the caller waited for that is not the model: our own
+                # preflight, and the budget ledger the provider charged before
+                # its stopwatch started. Both are always present, including as
+                # zero, because "we measured it and it was nothing" is a
+                # different statement from "we did not measure it".
+                "preflight_ms": round(preflight_ms, 3),
+                "budget_wait_ms": round(response.budget_wait_ms, 3),
                 # Present only when it says something. `latency_ms` above is the
                 # attempt that worked; these two are what the caller waited.
                 **(

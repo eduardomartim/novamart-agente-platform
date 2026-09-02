@@ -7,8 +7,10 @@ through the central sanitiser before handing it to the repository.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,8 +34,22 @@ class TraceContext:
     trace_id: str
 
 
+#: What an observer is handed: the event type and the agent, both as the
+#: platform's own stable identifiers, never as anything a reader sees. A
+#: dashboard translates them; the trace does not know a dashboard exists.
+EventObserver = Callable[[str, str | None], None]
+
+
 class Tracer:
-    """Writes ordered, sanitised events for a single request."""
+    """Writes ordered, sanitised events for a single request.
+
+    An optional *observer* is notified after each event is stored. It exists so
+    a caller can show progress while a synchronous request runs -- the
+    dashboard turns "the researcher started" into a line a visitor can read --
+    and it is deliberately weak: it receives two identifier strings, is called
+    only after the write has succeeded, and cannot fail the request. A UI is
+    not allowed to break a trace.
+    """
 
     def __init__(
         self,
@@ -43,8 +59,10 @@ class Tracer:
         trace_id: str,
         max_payload_chars: int = 500,
         known_secrets: tuple[str, ...] = (),
+        observer: EventObserver | None = None,
     ) -> None:
         self._repository = repository
+        self._observer = observer
         self.request_id = request_id
         self.trace_id = trace_id
         self._max_payload_chars = max_payload_chars
@@ -124,6 +142,14 @@ class Tracer:
                 payload=safe_payload if isinstance(safe_payload, dict) else {"value": safe_payload},
             )
         )
+
+        # After the write, never before, and never able to undo it. An observer
+        # is presentation code -- a Streamlit call, in practice -- and the one
+        # thing it must not do is turn a rendering fault into a failed request
+        # whose events are already durable.
+        if self._observer is not None:
+            with contextlib.suppress(Exception):
+                self._observer(event_type.value, agent_name)
 
     def policy_event(
         self,

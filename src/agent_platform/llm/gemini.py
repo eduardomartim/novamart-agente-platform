@@ -255,6 +255,9 @@ class GeminiProvider:
         # actually waited, backoff included.
         call_started = time.perf_counter()
         failures: list[str] = []
+        # Summed across attempts: the ledger is charged once per physical
+        # attempt, and each charge can block independently.
+        budget_wait = 0.0
 
         for attempt in range(1, self._retry.max_attempts + 1):
             config = self._build_config(
@@ -268,11 +271,23 @@ class GeminiProvider:
             # like one -- and refused when the day's allowance cannot afford
             # it. Checked here, immediately before the SDK call, so nothing can
             # slip between the decision and the request.
-            if self._budget is not None and not self._budget.try_consume():
-                raise ProviderBudgetExhausted(
-                    "the daily provider-call budget for this deployment is "
-                    "spent; no further calls will be made today"
-                )
+            if self._budget is not None:
+                # Timed, not changed. The ledger runs a BEGIN IMMEDIATE
+                # transaction that blocks while another process holds it,
+                # and it sits *before* the stopwatch below -- so until now
+                # the wait was spent inside this method and reported by no
+                # field at all. Two recorded requests showed a thirty-second
+                # gap between an agent starting and its model call, with the
+                # call itself taking under two seconds; whether the ledger
+                # is the cause is exactly what this measures.
+                budget_started = time.perf_counter()
+                granted = self._budget.try_consume()
+                budget_wait += (time.perf_counter() - budget_started) * 1000.0
+                if not granted:
+                    raise ProviderBudgetExhausted(
+                        "the daily provider-call budget for this deployment "
+                        "is spent; no further calls will be made today"
+                    )
 
             started = time.perf_counter()
             try:
@@ -338,6 +353,7 @@ class GeminiProvider:
                     attempts=attempt,
                     total_elapsed_ms=(time.perf_counter() - call_started) * 1000.0,
                     retry_reasons=tuple(failures),
+                    budget_wait_ms=budget_wait,
                 )
 
             if attempt < self._retry.max_attempts:

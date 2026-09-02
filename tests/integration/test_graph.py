@@ -306,12 +306,24 @@ def test_events_are_sequential_within_a_request(platform):
 
 
 def test_no_llm_call_event_carries_prompt_or_completion_text(platform):
+    """An allow-list, so a key nobody reviewed cannot appear here unnoticed.
+
+    `preflight_ms` and `budget_wait_ms` were reviewed to join it: both are
+    `perf_counter` differences rounded to three places, so neither is capable
+    of carrying prompt or completion text -- a float has nowhere to put a
+    sentence.
+    """
     platform.run("What is the status of order 1001?")
     for event in platform.repository.events:
         if event.event_type == "llm_call":
             assert set(event.payload) <= {
                 "provider", "model", "purpose", "input_tokens",
                 "output_tokens", "estimated_cost_usd", "tokens_estimated",
+                "preflight_ms", "budget_wait_ms",
+                # Added only when the provider retried, which the stub never
+                # does -- so this pair is unreachable offline and was missing
+                # from the list for exactly that reason. Both are numbers.
+                "attempts", "total_elapsed_ms",
             }
 
 

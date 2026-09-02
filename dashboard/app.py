@@ -750,6 +750,23 @@ def _confirmation_panel(platform: AgentPlatform, last: dict[str, Any]) -> None:
     )
 
 
+#: Agent identifier -> catalogue key. Identifiers are the platform's, stable
+#: and English; only the value a reader sees is translated. An agent absent
+#: from this map simply does not announce itself.
+_PROGRESS_STEPS: dict[str, str] = {
+    "router": "progress.router",
+    "researcher": "progress.researcher",
+    "executor": "progress.executor",
+    "validator": "progress.validator",
+    "answerer": "progress.finishing",
+}
+
+#: Events that mean the work is over, whichever way it ended.
+_PROGRESS_FINAL = frozenset(
+    {"request_completed", "request_failed", "confirmation_requested"}
+)
+
+
 def _run_question(platform: AgentPlatform, question: str) -> None:
     """Run one request and keep everything the result pages need.
 
@@ -758,8 +775,31 @@ def _run_question(platform: AgentPlatform, question: str) -> None:
     platform without saying so would answer in Portuguese -- the one failure
     this whole translation exists to avoid.
     """
-    with use_locale(current_locale()):
-        result = platform.run(question)
+    # The progress line, driven by the events the request actually emits.
+    #
+    # `platform.run()` is synchronous and runs on this very script thread, so
+    # writing to a Streamlit element from inside the observer is an ordinary
+    # call on the ordinary thread -- no polling, no background worker, no
+    # rerun. `st.status` is a native container and is updated through its own
+    # API; nothing here touches the DOM, which is the one thing this app has
+    # learned not to do.
+    #
+    # The mapping is from agent identifier to catalogue key, so the labels
+    # follow the reader's language while the identifiers stay English and
+    # stable. An agent that takes no part in a route never emits
+    # `agent_started`, so its line never appears: the progress shown is the
+    # progress that happened.
+    with st.status(t("progress.router"), expanded=False) as progress:
+
+        def announce(event_type: str, agent: str | None) -> None:
+            if event_type == "agent_started" and agent in _PROGRESS_STEPS:
+                progress.update(label=t(_PROGRESS_STEPS[agent]))
+            elif event_type in _PROGRESS_FINAL:
+                progress.update(label=t("progress.finishing"))
+
+        with use_locale(current_locale()):
+            result = platform.run(question, on_event=announce)
+        progress.update(label=t("progress.done"), state="complete")
     # `events_for_request` already returns plain dicts, which is exactly what
     # `execution_view.build` consumes. Nothing is reshaped here: a second
     # projection of the same rows is a second place for the two to disagree.
@@ -920,10 +960,12 @@ def page_orchestrator(platform: AgentPlatform) -> None:
     if run_clicked:
         question = (st.session_state.get("question_box") or "").strip()
         if question:
-            # A spinner is the only honest signal here: the run is synchronous,
-            # so without it the page simply stops responding for a second.
-            with st.spinner(t("orch.running")):
-                _run_question(platform, question)
+            # The progress container lives inside `_run_question`, next to the
+            # events that drive it. It replaces the spinner that used to be
+            # here: a spinner said only "something is happening", which for a
+            # request that can spend a minute retrying against a busy provider
+            # is indistinguishable from a page that has stopped responding.
+            _run_question(platform, question)
 
     # The result comes before the examples. It used to come after them, which
     # meant clicking Executar scrolled nothing and the answer appeared below

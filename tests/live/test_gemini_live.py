@@ -261,6 +261,15 @@ def test_traces_carry_no_prompt_or_completion_text(live_platform):
             assert set(event.payload) <= {
                 "provider", "model", "purpose", "input_tokens",
                 "output_tokens", "estimated_cost_usd", "tokens_estimated",
+                # Reviewed additions, all four of them numbers: two stopwatch
+                # readings taken either side of the provider call, the physical
+                # attempt count, and the wall-clock across every attempt. An
+                # int and three rounded floats have nowhere to put a sentence,
+                # which is what this allow-list exists to keep out. The text
+                # that *could* leak -- the provider's own retry reasons -- goes
+                # to the `error` column of `llm_retry`, scrubbed, and is
+                # deliberately absent from every payload.
+                "preflight_ms", "budget_wait_ms", "attempts", "total_elapsed_ms",
             }
 
 

@@ -120,6 +120,18 @@ class LLMResponse:
     #: provider. Never carries a credential: see ``GeminiProvider._scrub``.
     retry_reasons: tuple[str, ...] = ()
 
+    #: Time spent waiting for the daily-budget ledger before the calls, summed
+    #: across every attempt.
+    #:
+    #: This one is not provider latency at all -- it is *our* accounting -- and
+    #: it is measured because it was invisible. The budget is charged inside
+    #: the retry loop but before the stopwatch that produces ``latency_ms``, so
+    #: a ledger that blocked on a lock spent wall-clock time that appeared in
+    #: no field: two recorded requests had a thirty-second gap between the
+    #: agent starting and its model call, with the call itself taking under two
+    #: seconds. Whether the ledger is the cause is exactly what this measures.
+    budget_wait_ms: float = 0.0
+
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens

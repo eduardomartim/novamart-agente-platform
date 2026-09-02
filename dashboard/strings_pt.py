@@ -96,7 +96,6 @@ STRINGS: Final[dict[str, str]] = {
     ),
     "orch.question": "Pergunta",
     "orch.run": "Executar",
-    "orch.running": "Executando…",
     "orch.examples": "Exemplos",
     "security.eyebrow": "Controles aplicados em execução",
     "security.title": "Segurança",
@@ -347,4 +346,10 @@ STRINGS: Final[dict[str, str]] = {
         "Modo live. Restam {remaining} de {budget} chamadas ao provedor no "
         "limite de hoje, cerca de {requests} requisições."
     ),
+    "progress.router": "Classificando sua pergunta...",
+    "progress.researcher": "Consultando os dados...",
+    "progress.executor": "Preparando a ação...",
+    "progress.validator": "Validando a resposta...",
+    "progress.finishing": "Finalizando...",
+    "progress.done": "Concluído",
 }
