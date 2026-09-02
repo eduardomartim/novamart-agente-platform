@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import altair as alt
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -37,6 +39,7 @@ from agent_platform.config import Settings
 from agent_platform.cost.pricing import pricing_notice
 from agent_platform.guardrails.authorization import describe_matrix
 from agent_platform.guardrails.rules import describe_rules
+from agent_platform.llm.authorization import LiveNotAuthorised
 from agent_platform.observability.metrics import collect_metrics
 from agent_platform.platform import AgentPlatform
 
@@ -206,8 +209,28 @@ _STYLE = """
 
 @st.cache_resource
 def get_platform() -> AgentPlatform:
-    """One platform instance per Streamlit session."""
-    return AgentPlatform(Settings.from_env())
+    """One platform instance per Streamlit session.
+
+    A key that is configured but not authorised is the one startup failure this
+    app can answer for itself. ``build_provider`` refuses it on purpose --
+    holding a key is not permission to spend it -- and that refusal is correct
+    and stays exactly as it is. What was wrong was the dashboard's answer to
+    it: none. It failed to start and showed a bare ``LiveNotAuthorised`` to the
+    visitor while a complete, working demo mode sat one branch away.
+
+    So the *interface* degrades rather than the gate. The settings are rebuilt
+    without the key, which is byte for byte the state of having no key at all,
+    and the sidebar's existing DEMO / STUB badge then says so in its own words.
+
+    Only this one exception is caught, and only around construction. A Gemini
+    failure, a gateway error, an unreadable database -- those are real faults
+    and must still stop the app rather than be quietly relabelled as a demo.
+    """
+    settings = Settings.from_env()
+    try:
+        return AgentPlatform(settings)
+    except LiveNotAuthorised:
+        return AgentPlatform(replace(settings, gemini_api_key=None))
 
 
 #: How many of the declared capabilities the landing page shows. The
@@ -1284,7 +1307,40 @@ PLATFORM_PAGES = {
 PAGES = {**DEMO_PAGES, **PLATFORM_PAGES}
 
 
+def _declare_language() -> None:
+    """Tell the browser this page is Portuguese, and not to translate it.
+
+    Streamlit serves ``<html lang="en">`` and offers no way to change it. Every
+    word of this dashboard is Portuguese, and that mismatch is what invites
+    Chrome to translate the page by itself -- which rewrites the DOM under
+    React's feet, wrapping text nodes in elements React never created. React
+    then unmounts a subtree on the next navigation, calls ``removeChild`` on a
+    node the translator has reparented, and the reader gets
+
+        NotFoundError: Failed to execute 'removeChild' on 'Node':
+        The node to be removed is not a child of this node.
+
+    printed where the page should be. Confirmed in an incognito window: the
+    error appears with translation on and does not appear with it off, and
+    ~170 navigations with an untouched DOM never produced it.
+
+    A ``<script>`` inside ``st.markdown`` cannot do this -- Streamlit does not
+    execute script tags in ``unsafe_allow_html``. ``components.v1.html`` renders
+    a same-origin iframe that does run JavaScript, which is the documented way
+    to reach the host document, so the two attributes are set from there.
+    """
+    components.html(
+        "<script>"
+        "const root = window.parent.document.documentElement;"
+        "root.lang = 'pt-BR';"
+        "root.setAttribute('translate', 'no');"
+        "</script>",
+        height=0,
+    )
+
+
 def main() -> None:
+    _declare_language()
     st.markdown(_STYLE, unsafe_allow_html=True)
     platform = get_platform()
 

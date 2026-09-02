@@ -204,3 +204,83 @@ def test_pending_confirmation_does_not_render_as_an_error(states_db):
     assert not app.exception
     errors = " ".join(e.value for e in app.error)
     assert "awaiting_confirmation" not in errors
+
+
+# ============================================ the state the app could not reach
+
+
+@pytest.fixture
+def dashboard_module(tmp_path):
+    """`dashboard/app.py` in `sys.modules`, imported the only way it can be.
+
+    It calls `main()` at import -- it is a Streamlit script, not a library --
+    so it is run once through `AppTest` with the demo environment set, after
+    which its helpers can be called directly. Same approach as
+    test_dashboard_rendering.py.
+    """
+    saved = {n: os.environ.get(n) for n in ("GEMINI_API_KEY", "DATABASE_PATH")}
+    os.environ["GEMINI_API_KEY"] = ""
+    os.environ["DATABASE_PATH"] = str(tmp_path / "startup.db")
+    st.cache_resource.clear()
+    try:
+        AppTest.from_file(str(APP), default_timeout=120).run()
+        import app
+
+        yield app
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        st.cache_resource.clear()
+
+
+def _start(dashboard_module, tmp_path, monkeypatch, *, key: str) -> str:
+    """Start the dashboard's platform under a given key, return the mode."""
+    monkeypatch.setenv("GEMINI_API_KEY", key)
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "startup.db"))
+    monkeypatch.delenv("AGENT_PLATFORM_LIVE", raising=False)
+    dashboard_module.get_platform.clear()
+    platform = dashboard_module.get_platform()
+    try:
+        return platform.provider_info.name
+    finally:
+        platform.close()
+
+
+def test_an_unauthorised_key_starts_the_dashboard_in_demo_mode(
+    dashboard_module, tmp_path, monkeypatch
+):
+    """The failure the visitor used to land on: a blank page.
+
+    A key that is configured but not authorised made `build_provider` raise --
+    correctly, because holding a key is not permission to spend it -- and the
+    dashboard had no answer to it, so it did not start at all. A complete demo
+    mode was one branch away the whole time.
+    """
+    assert _start(dashboard_module, tmp_path, monkeypatch, key="not-a-real-key") == "stub"
+
+
+def test_no_key_at_all_is_unchanged(dashboard_module, tmp_path, monkeypatch):
+    """The path that already worked must keep working, by the same route."""
+    assert _start(dashboard_module, tmp_path, monkeypatch, key="") == "stub"
+
+
+def test_the_fallback_does_not_relax_the_gate(monkeypatch):
+    """The half that matters more than the fallback itself.
+
+    Degrading the *interface* must leave the barrier exactly where it was: the
+    factory still refuses an unauthorised key, and nothing about the dashboard
+    catching that refusal makes a live provider reachable without the phrase.
+    """
+    from agent_platform.llm import build_provider
+    from agent_platform.llm.authorization import LIVE_ENV_VAR, LiveNotAuthorised
+
+    monkeypatch.delenv(LIVE_ENV_VAR, raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "not-a-real-key")
+    keyed = Settings.from_env(load_dotenv_file=False)
+    assert not keyed.demo_mode
+
+    with pytest.raises(LiveNotAuthorised):
+        build_provider(keyed)
