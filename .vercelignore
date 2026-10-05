@@ -1,0 +1,34 @@
+# What `vercel deploy` uploads from this directory: the API function and
+# nothing else.
+#
+# Why it exists: the Vercel CLI's built-in ignore list covers `.env.local` and
+# `.env.*.local` but **not `.env`**, so a deploy run from a working copy would
+# upload the local `.env` -- the provider key with it -- to the build. A
+# git-connected deploy never sees `.env` (it is git-ignored and was never
+# committed); a CLI deploy reads the directory, and this file is what stands
+# between the two.
+#
+# Deny by default, then allow back exactly what `api/index.py` needs: the
+# entrypoint and its manifest, the package it imports from `src/`, the hashed
+# lock the manifest points at, and the vector index hybrid retrieval loads.
+# Anything new added to the repository stays out until it is listed here.
+
+/*
+!/api
+!/src
+!/requirements-api.txt
+!/vercel.json
+!/data
+/data/*
+!/data/kb_vectors.db
+
+# Re-excluded inside the paths allowed back above.
+**/__pycache__/
+**/*.py[cod]
+
+# Stated outright, although `/*` already covers them at the root: these must
+# never be uploaded from anywhere in the tree.
+**/.env
+**/.env.*
+**/*.key
+**/*.pem

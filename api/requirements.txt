@@ -1,0 +1,23 @@
+# The API's dependency manifest, placed beside the entrypoint on purpose.
+#
+# Vercel's Python builder walks up from the entrypoint's directory to the
+# repository root and, at each level, looks for `pyproject.toml`, `Pipfile.lock`
+# and `Pipfile` *before* it looks for `requirements*.txt`. This repository has a
+# `pyproject.toml` at the root, so without this file the walk would reach the
+# root, find that, and install `[project.dependencies]` -- which is the library
+# core and deliberately excludes `starlette`, `uvicorn`, `redis` and `psycopg`.
+# The function would then fail to import at cold start with a missing Starlette,
+# and the hashed lock the rest of this project maintains would never be read.
+#
+# `api/` has no `pyproject.toml`, so this file is found one level earlier and
+# settles it. It is a pointer, not a second list: the lock stays the single
+# source of truth for what the API installs, exactly as it is for the Docker
+# image, so the two deployments cannot drift apart.
+#
+# One consequence worth knowing rather than discovering: Vercel parses this with
+# uv's requirements parser and converts it into a generated `pyproject.toml`,
+# keeping the `==` pins but dropping the `--hash` lines. Versions are therefore
+# identical to the image; artefact verification is pip's `--require-hashes` in
+# the Dockerfile and is not available on that path.
+
+-r ../requirements-api.txt

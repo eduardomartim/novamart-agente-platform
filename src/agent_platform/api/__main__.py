@@ -28,13 +28,15 @@ def main() -> int:
     # starts so no line escapes the plain formatter first.
     if os.getenv("LOG_FORMAT", "json").lower() == "json":
         from ..observability import logging as structured
+        from ..security.secrets import known_secret_values
 
         structured.configure(
             os.getenv("LOG_LEVEL", "info"),
-            known_secrets=(
+            known_secrets=known_secret_values(
                 os.getenv("GEMINI_API_KEY"),
                 os.getenv("EXECUTION_GRANT_SECRET"),
                 os.getenv("REDIS_URL"),
+                os.getenv("DATABASE_URL"),
             ),
         )
 

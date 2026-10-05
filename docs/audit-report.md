@@ -22,13 +22,16 @@ Recorded in order:
 >
 > The same applies to the dashboard. Sections here describe a **thirteen-page,
 > English interface** with pages named *Start here*, *Try a request* and
-> *Demo scenarios*. That interface was replaced in V3.0 by six Portuguese
-> pages; the audits below are the record of testing the interface as it stood,
-> not a description of the one that ships. The current interface is documented
-> in the README.
+> *Demo scenarios*. That interface was replaced in V3.0 by six pages, now in
+> Portuguese and English; the audits below are the record of testing the
+> interface as it stood, not a description of the one that ships. The current
+> interface is documented in the README. The tool count, too, kept growing
+> after "eight": the registry holds nineteen (README, *Tools*).
 
-> **Action required:** §16.6 records an API key that was exposed in terminal
-> output during Phase 3 testing. Rotate it.
+> **Resolved:** §16.6 records an API key that was exposed in terminal output
+> during Phase 3 testing. That key was revoked and replaced, and the
+> replacement verified without disclosing it -- see §26. No key value appears
+> anywhere in this repository or its history.
 
 ---
 

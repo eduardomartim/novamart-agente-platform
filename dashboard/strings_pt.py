@@ -15,10 +15,84 @@ from typing import Final
 
 STRINGS: Final[dict[str, str]] = {
     "overview.lede": (
-        "A NovaMart usa agentes de IA especializados para consultar clientes, "
-        "pedidos e suporte. Um orquestrador decide quais agentes entram em "
-        "ação, e um <strong>Policy Engine</strong> bloqueia operações de risco "
-        "antes que qualquer ferramenta rode."
+        "NovaMart é um orquestrador empresarial de agentes de IA. Ele lê uma "
+        "solicitação em linguagem natural, decide quais agentes especializados "
+        "entram em ação, alcança ferramentas e dados, e um "
+        "<strong>Policy Engine</strong> decide o que pode rodar — antes que "
+        "qualquer ferramenta rode."
+    ),
+    "hero.chip_autonomy": "Autonomia",
+    "hero.chip_governance": "Governança",
+    "hero.chip_security": "Segurança",
+    "hero.chip_observability": "Observabilidade",
+    "hero.chip_scale": "Escalabilidade",
+    "scene.live": "Ao vivo (demo)",
+    "ov.env_title": "Ambiente de demonstração",
+    "ov.tech_title": "Tecnologias utilizadas",
+    "ov.state_title": "Estado desta instalação",
+    "ov.state_mode": "Modo",
+    "ov.state_requests": "Requisições registradas",
+    "ov.state_provider": "Chamadas ao provedor no ledger",
+    "ov.state_rules": "Políticas ativas",
+    "ov.state_note": (
+        "Números lidos do banco e do código desta instalação. Não há uptime, "
+        "SLA nem contagem de usuários aqui porque este projeto não tem nenhum "
+        "dos três."
+    ),
+    "hero.headline": "Plataforma de Orquestração de Agentes de IA Empresarial",
+    "hero.sub": (
+        "O NovaMart orquestra agentes especializados para executar tarefas de "
+        "negócio de forma governada. O orquestrador decide quem entra em ação, "
+        "um <strong>Policy Engine</strong> autoriza antes de qualquer execução, "
+        "um gateway é o único caminho até as ferramentas, e cada passo fica "
+        "registrado."
+    ),
+    "hero.cta_explore": "Explorar a plataforma",
+    "hero.cta_arch": "Ver a arquitetura",
+    "metric.rules": "políticas",
+    "metric.rules_sub": "Decidem antes de qualquer execução",
+    "metric.agents": "agentes",
+    "metric.agents_sub": "Router, researcher, executor, validator, answerer",
+    "metric.tools": "ferramentas",
+    "metric.tools_sub": "Alcançadas só pelo gateway",
+    "metric.audit": "Auditoria",
+    "metric.audit_head": "por requisição",
+    "metric.audit_sub": "Id, passos cronometrados e decisão gravados",
+    "scene.title": "Arquitetura em ação",
+    "scene.trace_title": "Execução em tempo real",
+    "scene.demo_tag": "Demonstração",
+    "scene.now": "Cenário",
+    "scene.note": (
+        "Dez workflows encenados, em repetição. Os agentes especializados "
+        "representam a capacidade de especialização da arquitetura — o backend "
+        "tem cinco agentes, nomeados em Arquitetura. Os sistemas de integração "
+        "são pontos possíveis de conexão; nenhum está conectado, e nada aqui faz "
+        "uma chamada externa. Para uma execução real, use o Orquestrador."
+    ),
+    "scene.idle": "As mensagens dos agentes aparecem aqui.",
+    "scene.verdict_idle": "O resultado aparece quando o cenário termina.",
+    "scene.leg_running": "Executando",
+    "scene.leg_success": "Concluído",
+    "scene.leg_waiting": "Aguardando aprovação",
+    "scene.leg_blocked": "Bloqueado",
+    "scene.caption": (
+        "Uma plataforma processando workflows diferentes — não um chatbot "
+        "respondendo perguntas."
+    ),
+    "overview.problem": "O problema que ele resolve",
+    "overview.problem_body": (
+        "Uma equipe de operações recebe o dia inteiro pedidos escritos por "
+        "pessoas: consultas simples, alterações que não podem acontecer sem "
+        "aprovação humana, e tentativas de convencer o sistema a fazer o que "
+        "ele deveria recusar. Um modelo de linguagem sozinho não separa os "
+        "três, porque quem interpreta o pedido é também quem decidiria "
+        "atendê-lo. O NovaMart separa as duas coisas: os agentes propõem, e a "
+        "autorização é decidida fora deles, a partir dos metadados da "
+        "ferramenta — nunca do que o modelo afirma."
+    ),
+    "overview.demo_env": (
+        "Demonstrado sobre a <strong>HDstore</strong>, uma varejista fictícia "
+        "criada só para isso. Os dados são simulados; a plataforma é real."
     ),
     "overview.how_it_works": "Como funciona",
     "overview.same_path": (
@@ -28,13 +102,13 @@ STRINGS: Final[dict[str, str]] = {
     "overview.try_it": "Experimente",
     "overview.try_lede": "Uma pergunta em linguagem natural, e a decisão que o sistema tomou.",
     "overview.run_this": "Executar esta pergunta",
-    "overview.why_english": (
-        "As perguntas estão em inglês porque é o idioma que o roteador e o "
-        "conjunto de dados usam — é literalmente o texto que entra no sistema."
+    "overview.ask_any_language": (
+        "Pergunte em português ou em inglês — o roteador entende os dois. "
+        "A resposta segue o idioma da interface."
     ),
     "overview.demonstrates": "O que este projeto demonstra",
     "overview.stack_note": (
-        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 testes de segurança — "
+        "RAG · MCP · Kubernetes · TLS · Prometheus · 840+ testes de segurança — "
         "detalhados em **Arquitetura**."
     ),
     "overview.what_holds": "O que sustenta isso",
@@ -45,11 +119,22 @@ STRINGS: Final[dict[str, str]] = {
     ),
     "overview.see_architecture": "Ver a arquitetura",
     "company.eyebrow": "Contexto da demonstração",
-    "company.lede": (
-        "Empresa fictícia de varejo e e-commerce. Ambiente simulado usado para "
-        "demonstrar como agentes de IA podem consultar clientes, pedidos, "
-        "produtos e tickets e executar ações protegidas por políticas."
+    "company.lede": "O ambiente empresarial contra o qual a plataforma é testada.",
+    "company.fictional_title": "A HDstore é uma empresa fictícia",
+    "company.fictional_body": (
+        "Ela foi criada exclusivamente para demonstrar o funcionamento e as "
+        "capacidades do NovaMart. **Não é uma empresa real e não é um cliente "
+        "real.** Todos os clientes, pedidos, produtos, tickets, remessas e "
+        "artigos abaixo são gerados e determinísticos. Existem para dar ao "
+        "orquestrador um contexto empresarial realista onde ser testado — e "
+        "para que as perguntas que você fizer tenham uma resposta verificável."
     ),
+    "company.tab_customers": "Clientes",
+    "company.tab_orders": "Pedidos",
+    "company.tab_products": "Produtos",
+    "company.tab_tickets": "Tickets",
+    "company.tab_shipments": "Remessas",
+    "company.tab_kb": "Base de conhecimento",
     "company.customers": "Clientes",
     "company.orders": "Pedidos",
     "company.products": "Produtos",
@@ -91,8 +176,10 @@ STRINGS: Final[dict[str, str]] = {
     "orch.eyebrow": "Demonstração principal",
     "orch.title": "Experimente o orquestrador",
     "orch.lede": (
-        "Faça uma pergunta em linguagem natural. O sistema decide quais agentes"
-        " e ferramentas são necessários."
+        "Faça uma pergunta de negócio e observe o NovaMart interpretar a "
+        "solicitação, escolher a rota e as ferramentas, coordenar os agentes, "
+        "consultar os dados, aplicar governança e construir a resposta. O que "
+        "aparece abaixo é a execução real — nenhuma etapa é encenada."
     ),
     "orch.question": "Pergunta",
     "orch.run": "Executar",
@@ -126,7 +213,71 @@ STRINGS: Final[dict[str, str]] = {
     ),
     "arch.request_path": "Caminho da requisição",
     "arch.platform": "Plataforma",
-    "arch.the_agents": "Os agentes",
+    "arch.current": "Demo atual",
+    "arch.current_lede": (
+        "O que roda nesta instalação, hoje. Cada caixa existe no código e é "
+        "exercitada pelos testes."
+    ),
+    "arch.production": "Arquitetura de produção",
+    "arch.production_lede": (
+        "Como a mesma plataforma se conectaria a uma empresa real. "
+        "<strong>Nada nesta linha está implementado</strong> — é a arquitetura "
+        "de integração pretendida, desenhada aqui para mostrar onde os sistemas "
+        "de um cliente entrariam. O que muda é a origem dos dados; o miolo "
+        "— agentes, política, gateway — é o mesmo da linha acima."
+    ),
+    "flow.simdata": "Dados simulados",
+    "flow.tools_plural": "Ferramentas",
+    "flow.realco": "Empresa real",
+    "flow.sources": "APIs · Webhooks · Bancos · ERP · CRM · SaaS · Documentos",
+    "flow.layer": "Camada de integração e dados",
+    "flow.authtools": "Ferramentas autorizadas",
+    "arch.the_agents": "Agentes",
+    "arch.group_governance": "Governança e serviços",
+    "arch.group_governance_lede": (
+        "Decidem e executam. Nenhum dos três é um agente, e é essa separação "
+        "que faz a autorização não depender do que o modelo disser."
+    ),
+    "arch.group_data": "Dados",
+    "arch.group_data_lede": "O que os agentes conseguem alcançar — e nada além disso.",
+    "arch.group_infra": "Infraestrutura e estado",
+    "arch.group_observability": "Observabilidade",
+    "svc.policy": "Policy Engine",
+    "svc.policy_body": (
+        "Onze regras decidem ALLOW, CONFIRM ou DENY a partir dos metadados da "
+        "ferramenta. Nunca lê o prompt."
+    ),
+    "svc.gateway": "Gateway",
+    "svc.gateway_body": (
+        "O único caminho até uma ferramenta. Uma chamada direta levanta "
+        "DirectToolInvocationError em vez de rodar."
+    ),
+    "svc.mcp": "MCP",
+    "svc.mcp_body": (
+        "As ferramentas ficam atrás de um limite de processo, alcançadas por "
+        "grants assinados de uso único."
+    ),
+    "data.dataset": "Dataset HDstore",
+    "data.dataset_body": (
+        "Clientes, pedidos, produtos, tickets e remessas — gerados, "
+        "determinísticos, em memória."
+    ),
+    "data.kb": "Base de conhecimento / RAG",
+    "data.kb_body": (
+        "Índice vetorial com proveniência verificada na carga, fundido com "
+        "ranqueamento lexical BM25."
+    ),
+    "obsv.tracing": "Tracing",
+    "obsv.tracing_body": (
+        "Cada requisição tem id e trace id; cada passo vira um evento "
+        "persistido, em ordem."
+    ),
+    "obsv.metrics": "Métricas",
+    "obsv.metrics_body": "Contadores e latências expostos no formato Prometheus.",
+    "obsv.logs": "Logs",
+    "obsv.logs_body": (
+        "Logs estruturados em JSON, correlacionados pelo id da requisição."
+    ),
     "arch.agents_lede": "Cinco papéis especializados. Nenhum deles executa uma ferramenta.",
     "arch.policy_not_agent": (
         "O **Policy Engine** não é um agente. Ele é a autoridade que decide o "
@@ -142,8 +293,29 @@ STRINGS: Final[dict[str, str]] = {
     "obs.requests": "Requisições",
     "obs.blocked": "Bloqueadas",
     "obs.tool_calls": "Chamadas de ferramenta",
-    "obs.avg_latency": "Latência média",
+    "obs.median_latency": "Latência mediana · {mode}",
+    "obs.median_latency_help": (
+        "Mediana de {samples} requisições registradas em modo {mode}. "
+        "Requisições do outro modo não entram no cálculo."
+    ),
+    "obs.median_latency_none": (
+        "Menos de {minimum} requisições registradas em modo {mode}. Amostra "
+        "insuficiente para uma mediana — e misturar os dois modos daria um "
+        "número que não descreve nenhum deles."
+    ),
+    "obs.real_vs_demo": (
+        "Tudo nesta página é medido, não estimado: sai dos eventos que as "
+        "requisições realmente gravaram. O que é de demonstração é a origem "
+        "das requisições — perguntas feitas nesta instalação, sobre um dataset "
+        "fictício. Não há uptime, SLA ou contagem de usuários aqui porque este "
+        "projeto não tem nenhum dos três."
+    ),
     "obs.recent_requests": "Requisições recentes",
+    "obs.col_request": "Requisição",
+    "obs.col_status": "Status",
+    "obs.col_route": "Rota",
+    "obs.col_retries": "Retries",
+    "obs.col_ms": "ms",
     "obs.none_recorded": "Nenhuma requisição registrada ainda.",
     "obs.no_recent": "Sem requisições recentes.",
     "obs.details": "Detalhes",
@@ -159,10 +331,14 @@ STRINGS: Final[dict[str, str]] = {
     "tech.agents": "Agentes",
     "tech.tools": "Ferramentas",
     "tech.full_event_sequence": "Sequência completa de eventos",
-    "nav.demo_group": "**DEMONSTRAÇÃO**",
+    "sidebar.status": "Plataforma ativa",
+    "sidebar.group_env": "Ambiente",
+    "sidebar.env_fictional": "{company} — ambiente fictício de demonstração",
+    "nav.demo_group": "Demonstração",
     "nav.page": "Página",
-    "nav.platform_group": "⚙ **PLATAFORMA** — os instrumentos operacionais.",
+    "nav.platform_group": "Plataforma — os instrumentos operacionais",
     "nav.overview": "Visão geral",
+    "flow.agents": "Agentes",
     "nav.company": "Empresa",
     "nav.orchestrator": "Orquestrador",
     "nav.security": "Segurança",
@@ -175,11 +351,7 @@ STRINGS: Final[dict[str, str]] = {
         "geradas localmente."
     ),
     "table.no_rows": "Sem registros para exibir.",
-    "orch.placeholder": "What is the status of order ORD-1001?",
-    "sidebar.simulated": (
-        "{company} é uma empresa simulada. Todas as ferramentas operam em "
-        "memória; nenhum sistema externo é contatado."
-    ),
+    "orch.placeholder": "Qual o status do pedido de Ana Ribeiro?",
     "mode.live_banner": (
         "<strong>Modo live.</strong> As requisições são processadas pelo "
         "provedor configurado (<code>{model}</code>)."
@@ -352,4 +524,78 @@ STRINGS: Final[dict[str, str]] = {
     "progress.validator": "Validando a resposta...",
     "progress.finishing": "Finalizando...",
     "progress.done": "Concluído",
+
+    # Run states, table headings and data values, translated at display
+    # time: the records keep their English keys and stored values.
+    "state.not_reached": "NÃO ALCANÇADO",
+    "state.running": "EXECUTANDO",
+    "state.waiting": "AGUARDANDO",
+    "state.success": "SUCESSO",
+    "state.blocked": "BLOQUEADO",
+    "state.failed": "FALHOU",
+    "state.out_of_scope": "SEM RESPOSTA",
+    "hint.populate": "Popule o banco com `agent-platform demo`.",
+    "tech.rules": "regras",
+    "tech.col_agent": "Agente",
+    "tech.col_state": "Estado",
+    "tech.col_detail": "Detalhe",
+    "tech.col_event": "Evento",
+    "tech.col_tool": "Ferramenta",
+    "tech.col_status": "Status",
+    "col.ID": "ID",
+    "col.Name": "Nome",
+    "col.Tier": "Segmento",
+    "col.City": "Cidade",
+    "col.State": "Estado",
+    "col.Customer since": "Cliente desde",
+    "col.Customer": "Cliente",
+    "col.Status": "Status",
+    "col.Placed on": "Data do pedido",
+    "col.Items": "Itens",
+    "col.Total (R$)": "Total (R$)",
+    "col.SKU": "SKU",
+    "col.Category": "Categoria",
+    "col.Price (R$)": "Preço (R$)",
+    "col.Warranty (months)": "Garantia (meses)",
+    "col.Order": "Pedido",
+    "col.Carrier": "Transportadora",
+    "col.Shipped on": "Enviado em",
+    "col.Delivered on": "Entregue em",
+    "col.Article": "Artigo",
+    "col.Characters": "Caracteres",
+    "col.Subject": "Assunto",
+    "col.Priority": "Prioridade",
+    "col.Opened on": "Aberto em",
+    "col.Ticket": "Ticket",
+    "col.Shipped": "Enviado",
+    "col.Order status": "Status do pedido",
+    "val.processing": "em processamento",
+    "val.shipped": "enviado",
+    "val.delivered": "entregue",
+    "val.cancelled": "cancelado",
+    "val.returned": "devolvido",
+    "val.open": "aberto",
+    "val.escalated": "escalado",
+    "val.resolved": "resolvido",
+    "val.high": "alta",
+    "val.normal": "normal",
+    "val.low": "baixa",
+    "val.gold": "Ouro",
+    "val.platinum": "Platinum",
+    "val.standard": "Standard",
+    "val.in_transit": "em trânsito",
+    "val.returned_to_sender": "devolvido ao remetente",
+    "val.accessories": "acessórios",
+    "val.audio": "áudio",
+    "val.displays": "monitores",
+    "val.furniture": "mobiliário",
+    "val.peripherals": "periféricos",
+    "val.storage": "armazenamento",
+    "step.detail_tool": "ferramenta {tool}",
+    "step.detail_risk": "risco {risk}",
+    "step.detail_rule": "regra {rules}",
+    "risk.low": "baixo",
+    "risk.medium": "médio",
+    "risk.high": "alto",
+    "risk.critical": "crítico",
 }

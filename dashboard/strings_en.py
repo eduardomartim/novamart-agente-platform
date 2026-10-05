@@ -15,10 +15,82 @@ from typing import Final
 
 STRINGS: Final[dict[str, str]] = {
     "overview.lede": (
-        "NovaMart uses specialised AI agents to look up customers, orders and "
-        "support. An orchestrator decides which agents take part, and a "
-        "<strong>Policy Engine</strong> blocks risky operations before any tool"
-        " runs."
+        "NovaMart is an enterprise AI agent orchestrator. It reads a request "
+        "written in plain language, decides which specialised agents take it "
+        "on, reaches tools and data, and a <strong>Policy Engine</strong> "
+        "decides what may run — before any tool runs."
+    ),
+    "hero.chip_autonomy": "Autonomy",
+    "hero.chip_governance": "Governance",
+    "hero.chip_security": "Security",
+    "hero.chip_observability": "Observability",
+    "hero.chip_scale": "Scalability",
+    "scene.live": "Live (demo)",
+    "ov.env_title": "Demonstration environment",
+    "ov.tech_title": "Technologies used",
+    "ov.state_title": "State of this installation",
+    "ov.state_mode": "Mode",
+    "ov.state_requests": "Requests recorded",
+    "ov.state_provider": "Provider calls in the ledger",
+    "ov.state_rules": "Active policies",
+    "ov.state_note": (
+        "Numbers read from this installation's database and code. There is no "
+        "uptime, SLA or user count here because this project has none of the "
+        "three."
+    ),
+    "hero.headline": "Enterprise AI Agent Orchestration Platform",
+    "hero.sub": (
+        "NovaMart orchestrates specialised agents to carry out business work "
+        "under governance. The orchestrator decides who steps in, a "
+        "<strong>Policy Engine</strong> authorises before anything runs, a "
+        "gateway is the only route to the tools, and every step is recorded."
+    ),
+    "hero.cta_explore": "Explore the platform",
+    "hero.cta_arch": "See the architecture",
+    "metric.rules": "policies",
+    "metric.rules_sub": "They decide before anything runs",
+    "metric.agents": "agents",
+    "metric.agents_sub": "Router, researcher, executor, validator, answerer",
+    "metric.tools": "tools",
+    "metric.tools_sub": "Reachable only through the gateway",
+    "metric.audit": "Audit",
+    "metric.audit_head": "per request",
+    "metric.audit_sub": "Id, timed steps and decision recorded",
+    "scene.title": "Architecture in action",
+    "scene.trace_title": "Live execution",
+    "scene.demo_tag": "Demonstration",
+    "scene.now": "Scenario",
+    "scene.note": (
+        "Ten staged workflows, on repeat. The specialised agents represent the "
+        "architecture's capacity for specialisation — the backend has five "
+        "agents, named under Architecture. The integration systems are "
+        "possible connection points; none is connected, and nothing here makes "
+        "an external call. For a real execution, use the Orchestrator."
+    ),
+    "scene.idle": "Agent messages appear here.",
+    "scene.verdict_idle": "The outcome appears when the scenario ends.",
+    "scene.leg_running": "Running",
+    "scene.leg_success": "Done",
+    "scene.leg_waiting": "Awaiting approval",
+    "scene.leg_blocked": "Blocked",
+    "scene.caption": (
+        "A platform working through different workflows — not a chatbot "
+        "answering questions."
+    ),
+    "overview.problem": "The problem it solves",
+    "overview.problem_body": (
+        "An operations team spends all day receiving requests written by "
+        "people: simple lookups, changes that must not happen without a human "
+        "saying yes, and attempts to talk the system into something it should "
+        "refuse. A language model on its own does not separate the three, "
+        "because whatever reads the request is also what would decide to grant "
+        "it. NovaMart splits those apart: agents propose, and authorisation is "
+        "decided outside them, from the tool's metadata — never from what the "
+        "model claims."
+    ),
+    "overview.demo_env": (
+        "Demonstrated on <strong>HDstore</strong>, a fictional retailer "
+        "created only for that. The data is simulated; the platform is real."
     ),
     "overview.how_it_works": "How it works",
     "overview.same_path": (
@@ -28,13 +100,13 @@ STRINGS: Final[dict[str, str]] = {
     "overview.try_it": "Try it",
     "overview.try_lede": "A question in plain language, and the decision the system made.",
     "overview.run_this": "Run this question",
-    "overview.why_english": (
-        "The questions are in English because that is the language the router "
-        "and the dataset use — it is literally the text that enters the system."
+    "overview.ask_any_language": (
+        "Ask in Portuguese or English — the router understands both. "
+        "The answer follows the interface language."
     ),
     "overview.demonstrates": "What this project demonstrates",
     "overview.stack_note": (
-        "RAG · MCP · Kubernetes · TLS · Prometheus · 727 security tests — "
+        "RAG · MCP · Kubernetes · TLS · Prometheus · 840+ security tests — "
         "detailed under **Architecture**."
     ),
     "overview.what_holds": "What holds this up",
@@ -45,11 +117,22 @@ STRINGS: Final[dict[str, str]] = {
     ),
     "overview.see_architecture": "See the architecture",
     "company.eyebrow": "Demo context",
-    "company.lede": (
-        "A fictional retail and e-commerce company. A simulated environment "
-        "used to demonstrate how AI agents can look up customers, orders, "
-        "products and tickets, and run actions guarded by policy."
+    "company.lede": "The business environment the platform is tested against.",
+    "company.fictional_title": "HDstore is a fictional company",
+    "company.fictional_body": (
+        "It was created solely to demonstrate what NovaMart does and what it "
+        "can do. **It is not a real company and it is not a real customer.** "
+        "Every customer, order, product, ticket, shipment and article below is "
+        "generated and deterministic. They exist to give the orchestrator a "
+        "realistic business context to be tested in — and so that the "
+        "questions you ask have a verifiable answer."
     ),
+    "company.tab_customers": "Customers",
+    "company.tab_orders": "Orders",
+    "company.tab_products": "Products",
+    "company.tab_tickets": "Tickets",
+    "company.tab_shipments": "Shipments",
+    "company.tab_kb": "Knowledge base",
     "company.customers": "Customers",
     "company.orders": "Orders",
     "company.products": "Products",
@@ -91,8 +174,10 @@ STRINGS: Final[dict[str, str]] = {
     "orch.eyebrow": "Main demonstration",
     "orch.title": "Try the orchestrator",
     "orch.lede": (
-        "Ask a question in plain language. The system decides which agents and "
-        "tools are needed."
+        "Ask a business question and watch NovaMart read the request, choose "
+        "the route and the tools, coordinate the agents, reach the data, apply "
+        "governance and build the answer. What appears below is the real "
+        "execution — no step is staged."
     ),
     "orch.question": "Question",
     "orch.run": "Run",
@@ -123,7 +208,71 @@ STRINGS: Final[dict[str, str]] = {
     "arch.lede": "One request path, one authority, and the infrastructure that holds both up.",
     "arch.request_path": "The request path",
     "arch.platform": "Platform",
-    "arch.the_agents": "The agents",
+    "arch.current": "Current demo",
+    "arch.current_lede": (
+        "What runs in this installation today. Every box exists in the code and "
+        "is exercised by the tests."
+    ),
+    "arch.production": "Production architecture",
+    "arch.production_lede": (
+        "How the same platform would connect to a real company. "
+        "<strong>Nothing on this line is implemented</strong> — it is the "
+        "intended integration architecture, drawn here to show where a "
+        "customer's systems would attach. What changes is where the data comes "
+        "from; the middle — agents, policy, gateway — is the same as the line "
+        "above."
+    ),
+    "flow.simdata": "Simulated data",
+    "flow.tools_plural": "Tools",
+    "flow.realco": "Real company",
+    "flow.sources": "APIs · Webhooks · Databases · ERP · CRM · SaaS · Documents",
+    "flow.layer": "Integration and data layer",
+    "flow.authtools": "Authorised tools",
+    "arch.the_agents": "Agents",
+    "arch.group_governance": "Governance and services",
+    "arch.group_governance_lede": (
+        "They decide and they execute. None of the three is an agent, and that "
+        "separation is what keeps authorisation from depending on anything the "
+        "model says."
+    ),
+    "arch.group_data": "Data",
+    "arch.group_data_lede": "What the agents can reach, and nothing beyond it.",
+    "arch.group_infra": "Infrastructure and state",
+    "arch.group_observability": "Observability",
+    "svc.policy": "Policy Engine",
+    "svc.policy_body": (
+        "Eleven rules decide ALLOW, CONFIRM or DENY from the tool's metadata. "
+        "It never reads the prompt."
+    ),
+    "svc.gateway": "Gateway",
+    "svc.gateway_body": (
+        "The only route to a tool. A direct call raises "
+        "DirectToolInvocationError instead of running."
+    ),
+    "svc.mcp": "MCP",
+    "svc.mcp_body": (
+        "Tools sit behind a process boundary, reached with signed single-use "
+        "grants."
+    ),
+    "data.dataset": "HDstore dataset",
+    "data.dataset_body": (
+        "Customers, orders, products, tickets and shipments — generated, "
+        "deterministic, in memory."
+    ),
+    "data.kb": "Knowledge base / RAG",
+    "data.kb_body": (
+        "A vector index with provenance verified at load, fused with BM25 "
+        "lexical ranking."
+    ),
+    "obsv.tracing": "Tracing",
+    "obsv.tracing_body": (
+        "Every request has an id and a trace id; every step becomes a "
+        "persisted event, in order."
+    ),
+    "obsv.metrics": "Metrics",
+    "obsv.metrics_body": "Counters and latencies exposed in Prometheus format.",
+    "obsv.logs": "Logs",
+    "obsv.logs_body": "Structured JSON logs, correlated by request id.",
     "arch.agents_lede": "Five specialised roles. None of them runs a tool.",
     "arch.policy_not_agent": (
         "The **Policy Engine** is not an agent. It is the authority that "
@@ -136,8 +285,29 @@ STRINGS: Final[dict[str, str]] = {
     "obs.requests": "Requests",
     "obs.blocked": "Blocked",
     "obs.tool_calls": "Tool calls",
-    "obs.avg_latency": "Average latency",
+    "obs.median_latency": "Median latency · {mode}",
+    "obs.median_latency_help": (
+        "Median of {samples} requests recorded in {mode} mode. Requests from "
+        "the other mode are not counted."
+    ),
+    "obs.median_latency_none": (
+        "Fewer than {minimum} requests recorded in {mode} mode. Too small a "
+        "sample for a median — and mixing the two modes would give a number "
+        "that describes neither."
+    ),
+    "obs.real_vs_demo": (
+        "Everything on this page is measured rather than estimated: it comes "
+        "from the events the requests actually recorded. What is demonstration "
+        "is where the requests came from — questions asked in this "
+        "installation, about a fictional dataset. There is no uptime, SLA or "
+        "user count here because this project has none of the three."
+    ),
     "obs.recent_requests": "Recent requests",
+    "obs.col_request": "Request",
+    "obs.col_status": "Status",
+    "obs.col_route": "Route",
+    "obs.col_retries": "Retries",
+    "obs.col_ms": "ms",
     "obs.none_recorded": "No requests recorded yet.",
     "obs.no_recent": "No recent requests.",
     "obs.details": "Details",
@@ -150,10 +320,14 @@ STRINGS: Final[dict[str, str]] = {
     "tech.agents": "Agents",
     "tech.tools": "Tools",
     "tech.full_event_sequence": "Full event sequence",
-    "nav.demo_group": "**DEMONSTRATION**",
+    "sidebar.status": "Platform running",
+    "sidebar.group_env": "Environment",
+    "sidebar.env_fictional": "{company} — fictional demonstration environment",
+    "nav.demo_group": "Demonstration",
     "nav.page": "Page",
-    "nav.platform_group": "⚙ **PLATFORM** — the operational instruments.",
+    "nav.platform_group": "Platform — the operational instruments",
     "nav.overview": "Overview",
+    "flow.agents": "Agents",
     "nav.company": "Company",
     "nav.orchestrator": "Orchestrator",
     "nav.security": "Security",
@@ -166,11 +340,7 @@ STRINGS: Final[dict[str, str]] = {
         "locally."
     ),
     "table.no_rows": "No rows to show.",
-    "orch.placeholder": "What is the status of order ORD-1001?",
-    "sidebar.simulated": (
-        "{company} is a simulated company. Every tool runs in memory; no "
-        "external system is contacted."
-    ),
+    "orch.placeholder": "What is the status of Ana Ribeiro's order?",
     "mode.live_banner": (
         "<strong>Live mode.</strong> Requests are processed by the configured "
         "provider (<code>{model}</code>)."
@@ -340,4 +510,78 @@ STRINGS: Final[dict[str, str]] = {
     "progress.validator": "Validating the response...",
     "progress.finishing": "Finalizing...",
     "progress.done": "Done",
+
+    # Run states, table headings and data values, translated at display
+    # time: the records keep their English keys and stored values.
+    "state.not_reached": "NOT REACHED",
+    "state.running": "RUNNING",
+    "state.waiting": "WAITING",
+    "state.success": "SUCCESS",
+    "state.blocked": "BLOCKED",
+    "state.failed": "FAILED",
+    "state.out_of_scope": "NO ANSWER",
+    "hint.populate": "Populate the database with `agent-platform demo`.",
+    "tech.rules": "rules",
+    "tech.col_agent": "Agent",
+    "tech.col_state": "State",
+    "tech.col_detail": "Detail",
+    "tech.col_event": "Event",
+    "tech.col_tool": "Tool",
+    "tech.col_status": "Status",
+    "col.ID": "ID",
+    "col.Name": "Name",
+    "col.Tier": "Tier",
+    "col.City": "City",
+    "col.State": "State",
+    "col.Customer since": "Customer since",
+    "col.Customer": "Customer",
+    "col.Status": "Status",
+    "col.Placed on": "Placed on",
+    "col.Items": "Items",
+    "col.Total (R$)": "Total (R$)",
+    "col.SKU": "SKU",
+    "col.Category": "Category",
+    "col.Price (R$)": "Price (R$)",
+    "col.Warranty (months)": "Warranty (months)",
+    "col.Order": "Order",
+    "col.Carrier": "Carrier",
+    "col.Shipped on": "Shipped on",
+    "col.Delivered on": "Delivered on",
+    "col.Article": "Article",
+    "col.Characters": "Characters",
+    "col.Subject": "Subject",
+    "col.Priority": "Priority",
+    "col.Opened on": "Opened on",
+    "col.Ticket": "Ticket",
+    "col.Shipped": "Shipped",
+    "col.Order status": "Order status",
+    "val.processing": "processing",
+    "val.shipped": "shipped",
+    "val.delivered": "delivered",
+    "val.cancelled": "cancelled",
+    "val.returned": "returned",
+    "val.open": "open",
+    "val.escalated": "escalated",
+    "val.resolved": "resolved",
+    "val.high": "high",
+    "val.normal": "normal",
+    "val.low": "low",
+    "val.gold": "Gold",
+    "val.platinum": "Platinum",
+    "val.standard": "Standard",
+    "val.in_transit": "in transit",
+    "val.returned_to_sender": "returned to sender",
+    "val.accessories": "accessories",
+    "val.audio": "audio",
+    "val.displays": "displays",
+    "val.furniture": "furniture",
+    "val.peripherals": "peripherals",
+    "val.storage": "storage",
+    "step.detail_tool": "tool {tool}",
+    "step.detail_risk": "{risk} risk",
+    "step.detail_rule": "rule {rules}",
+    "risk.low": "low",
+    "risk.medium": "medium",
+    "risk.high": "high",
+    "risk.critical": "critical",
 }

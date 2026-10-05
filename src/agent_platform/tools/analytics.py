@@ -116,7 +116,7 @@ def _brl(value: float) -> str:
     """Format a number the way a Brazilian reader expects to see money.
 
     The currency does not change with the locale, and neither does the
-    grouping. NovaMart's orders are in reais whoever is reading, so an English
+    grouping. HDstore's orders are in reais whoever is reading, so an English
     reader sees ``R$ 33.002,50`` too -- converting it would invent an exchange
     rate, and re-grouping it would make the same figure look like two.
     """

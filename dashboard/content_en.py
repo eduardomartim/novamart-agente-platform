@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-COMPANY_TAGLINE: Final[str] = (
-    "Electronics and workplace equipment retail, Brazil"
-)
+from arch_en import ARCH_HEADINGS as ARCH_HEADINGS
+from arch_en import ARCH_NODES as ARCH_NODES
+from arch_en import ARCH_SCENARIOS as ARCH_SCENARIOS
 
 AGENT_ROLES: Final[list[dict[str, str]]] = [
     {

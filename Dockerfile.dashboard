@@ -1,0 +1,105 @@
+# The Streamlit dashboard, packaged for Railway.
+#
+# Separate from `Dockerfile` on purpose, and deliberately not a hybrid of it.
+# That file builds the API: it installs the API lock, drops the source tree, and
+# ends in `ENTRYPOINT ["python", "-m", "agent_platform.api"]`. Teaching one image
+# to be either thing means a runtime branch deciding which product it is, and
+# the branch that is wrong is the one nobody exercises. Two images, each with
+# one job.
+#
+# The dashboard is **not** a client of the API. It imports `AgentPlatform` and
+# runs it in this process, so this image carries the platform and its
+# dependencies rather than an HTTP client pointed at Vercel.
+#
+# The source tree is copied rather than installed as a wheel, which is the other
+# way this differs from the API image. `dashboard/app.py` puts `<repo>/src` on
+# `sys.path` itself and the retrieval layer finds its index at `<repo>/data`, so
+# the checkout layout is what those two paths are written against. Preserving it
+# is one COPY; changing them to suit a wheel would be changing application code
+# to suit a container.
+
+FROM python:3.12-slim-trixie AS runtime
+
+# Numeric uid/gid, as in the API image: a pod spec or a `--user` flag takes a
+# number, and one that never has to read /etc/passwd is the same identity
+# everywhere.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN groupadd --gid ${APP_GID} app \
+ && useradd --uid ${APP_UID} --gid ${APP_GID} --no-create-home --shell /usr/sbin/nologin app
+
+WORKDIR /app
+
+# Dependencies first, so this layer survives every change to the application.
+#
+# `--no-require-hashes` rather than `--require-hashes`, and the difference is
+# real: `requirements-api.txt` carries hashes and they are verified, while the
+# dashboard-only packages -- every one pinned, transitive ones included -- are
+# pinned by version alone. pip's hash checking is all-or-nothing, so a mixed
+# file needs this flag to install at all. See requirements-dashboard.txt for
+# how to close that gap.
+COPY requirements-dashboard.txt requirements-api.txt ./
+# `pip uninstall` is not followed by `|| true`. It used to be, and in a chain of
+# `&&` that does not mean what it looks like: `a && b || true && c` runs `true`
+# when *anything* before it fails, so a failed install continued to the next
+# step and produced an image without its dependencies. Uninstalling a package
+# that is not there exits 0 with a warning, so nothing here needs excusing.
+RUN python -m pip install --no-cache-dir --no-compile --no-require-hashes \
+      -r requirements-dashboard.txt \
+ && rm requirements-dashboard.txt requirements-api.txt \
+ && python -m pip uninstall -y pip setuptools wheel \
+ && find /usr/local/lib/python3.12 -depth -name '__pycache__' -type d -exec rm -rf {} + \
+ && find /usr/local/lib/python3.12 -name '*.pyc' -delete
+
+# The application, in the layout its own path logic expects: `/app/src` for the
+# package and `/app/dashboard` for the pages, because `app.py` resolves the
+# former from the latter's parent.
+COPY --chown=root:root src/ /app/src/
+COPY --chown=root:root dashboard/ /app/dashboard/
+
+# The hardening configuration. `showErrorDetails`, `toolbarMode` and
+# `gatherUsageStats` are security settings, not cosmetics -- an image that
+# shipped without this file would render tracebacks, and their absolute paths,
+# into a visitor's browser.
+COPY --chown=root:root .streamlit/ /app/.streamlit/
+
+# The vector index, read-only to everyone. Demo traffic never opens it -- stub
+# mode is BM25 over FTS5 -- but hybrid retrieval needs it once a provider is
+# configured, and an image that silently lacked it would fail only then.
+RUN install -d -o root -g root -m 0755 /app/data
+COPY --chown=root:root --chmod=0444 data/kb_vectors.db /app/data/kb_vectors.db
+
+# The one writable path, and it exists only for the fallback.
+#
+# `DATABASE_PATH` defaults to the *relative* `data/agent_platform.db`, which in
+# this image would mean writing into the read-only application tree. A deployed
+# dashboard sets `DATABASE_URL` and uses Postgres, so nothing writes here at
+# all; this is what stops the misconfigured case from being a crash in a path
+# nobody would think to look at.
+RUN install -d -o ${APP_UID} -g ${APP_GID} -m 0755 /var/lib/agent-platform
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DATABASE_PATH=/var/lib/agent-platform/agent_platform.db \
+    KB_VECTOR_INDEX_PATH=/app/data/kb_vectors.db
+
+# No GEMINI_API_KEY and no AGENT_PLATFORM_LIVE. Their absence is what selects
+# the deterministic stub, so the image runs offline by default and both are
+# things an operator supplies at run time -- never baked into a layer.
+
+USER ${APP_UID}:${APP_GID}
+
+# Railway routes to whatever `$PORT` says, and it is injected at run time rather
+# than known now, so this cannot be an EXPOSE of a fixed number or an exec-form
+# CMD. Shell form, so the variable is expanded by a shell when the container
+# starts; `exec` so Streamlit is PID 1 and receives SIGTERM directly instead of
+# being killed after a timeout.
+#
+# `--server.address=0.0.0.0` because binding localhost is unreachable from
+# outside the container, and `--server.headless=true` so Streamlit neither tries
+# to open a browser nor prompts for an email on first run.
+CMD exec streamlit run dashboard/app.py \
+      --server.port="${PORT:-8501}" \
+      --server.address=0.0.0.0 \
+      --server.headless=true

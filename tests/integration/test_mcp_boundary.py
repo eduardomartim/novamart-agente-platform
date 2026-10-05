@@ -419,7 +419,34 @@ def test_inprocess_mode_needs_no_secret_at_all():
         try:
             result = platform.run("What is the status of order ORD-1001?")
             assert result.status == "success"
-            assert "ORD-1001" in result.response
+            assert result.response.strip(), "a successful run produced no answer"
+
+            # Evidence that the *right operation actually ran*, taken from the
+            # trace rather than from the sentence.
+            #
+            # This asserted `"ORD-1001" in result.response`, which stopped being
+            # true when the answer became a humanised sentence: the tool writes
+            # it in the interface language and it names the customer and the
+            # total instead of echoing the identifier. That was a deliberate
+            # product change, and pinning the prose here was pinning a
+            # translation -- the assertion would break again on the next wording
+            # or locale without anything about this boundary having moved.
+            #
+            # The identifier is still a contract, of the tool call rather than
+            # of the sentence, which is the layer the rest of this file asserts
+            # it at (see test_the_server_runs_in_a_separate_process). Checking it
+            # here keeps the property this test needs -- that `inprocess` really
+            # executed the lookup, rather than reaching `success` vacuously --
+            # and is indifferent to how the answer is phrased.
+            calls = [
+                event
+                for event in platform.repository.events_for_request(result.request_id)
+                if event["event_type"] == "tool_call" and event["status"] == "success"
+            ]
+            lookups = [call for call in calls if call["tool"] == "get_order"]
+            assert lookups, f"no successful get_order ran; tool calls were {calls}"
+            assert lookups[0]["payload"]["arguments"] == {"order_id": "ORD-1001"}
+            assert lookups[0]["payload"]["output"]["order"]["order_id"] == "ORD-1001"
         finally:
             platform.close()
     finally:

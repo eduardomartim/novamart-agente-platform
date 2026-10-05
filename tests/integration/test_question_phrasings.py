@@ -14,7 +14,7 @@ imperatives with no question mark, contractions, and the plain-spoken version
 that uses none of the vocabulary the code was written around.
 
 **Route and tool are asserted together**, because they fail independently.
-"Give me an overview of NovaMart" picked the right tool and was refused anyway:
+"Give me an overview of HDstore" picked the right tool and was refused anyway:
 the router saw no question mark and no lookup noun, classified it as small
 talk, and the tool choice was never consulted. A test that checked only the
 tool would have passed while the visitor got a refusal.
@@ -111,7 +111,7 @@ FAMILIES: dict[str, tuple[str, ...]] = {
         "Há tickets de alta prioridade?",
     ),
     "business_overview": (
-        "Give me an overview of NovaMart.",
+        "Give me an overview of HDstore.",
         "Give me an overview of the business.",
         "What should I know as a manager?",
         "Is there anything wrong I should be aware of?",
@@ -354,7 +354,7 @@ def test_an_instruction_to_change_something_is_not_a_read(phrase):
 # ================================== a written rule is not a missing record
 
 
-#: The line the refusal has to draw. NovaMart has no refund *transactions* --
+#: The line the refusal has to draw. HDstore has no refund *transactions* --
 #: nothing in `ORDERS` records one -- but the knowledge base holds a "Refund
 #: policy" article and a "Returns process" one. So the rule is answerable and
 #: the count is not, from the same word.

@@ -12,6 +12,9 @@ without any action being genuinely destructive.
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,6 +36,12 @@ SIMULATED_EMAIL_MARKER: Final[str] = "SIMULATED EMAIL - no message was sent"
 
 #: Mutable working copies. Write tools mutate these, never the source dataset,
 #: so ``reset_dataset()`` always restores a known-good state.
+#:
+#: These are the *process* working set: what the CLI, the API and the tests
+#: use. A caller that serves several people from one process -- the public
+#: dashboard -- gives each of them a :class:`WorkingSet` of their own through
+#: :func:`dataset_scope`, so one visitor approving an update does not change
+#: the order every other visitor reads.
 _orders: dict[str, dict[str, Any]] = copy.deepcopy(ORDERS)
 _customers: dict[str, dict[str, Any]] = copy.deepcopy(CUSTOMERS)
 _tickets: dict[str, dict[str, Any]] = copy.deepcopy(TICKETS)
@@ -44,6 +53,53 @@ def reset_dataset() -> None:
     _orders = copy.deepcopy(ORDERS)
     _customers = copy.deepcopy(CUSTOMERS)
     _tickets = copy.deepcopy(TICKETS)
+
+
+class WorkingSet:
+    """One private, mutable copy of the simulated records."""
+
+    __slots__ = ("customers", "orders", "tickets")
+
+    def __init__(self) -> None:
+        self.orders: dict[str, dict[str, Any]] = copy.deepcopy(ORDERS)
+        self.customers: dict[str, dict[str, Any]] = copy.deepcopy(CUSTOMERS)
+        self.tickets: dict[str, dict[str, Any]] = copy.deepcopy(TICKETS)
+
+
+#: The working set in force for this context, or ``None`` for the process one.
+#: A ContextVar rather than a global swap: the gateway runs each handler under
+#: ``copy_context()``, so the scope follows the request onto the worker thread,
+#: and two visitors' requests on two threads never see each other's copy.
+_SCOPED: ContextVar[WorkingSet | None] = ContextVar("simulated_dataset", default=None)
+
+
+@contextmanager
+def dataset_scope(working_set: WorkingSet) -> Iterator[WorkingSet]:
+    """Run the enclosed requests against *working_set* instead of the process copy.
+
+    In-process tool execution only: with ``TOOL_TRANSPORT=mcp`` the handlers run
+    in another process, which has its own process copy.
+    """
+    token = _SCOPED.set(working_set)
+    try:
+        yield working_set
+    finally:
+        _SCOPED.reset(token)
+
+
+def _current_orders() -> dict[str, dict[str, Any]]:
+    scoped = _SCOPED.get()
+    return scoped.orders if scoped is not None else _orders
+
+
+def _current_customers() -> dict[str, dict[str, Any]]:
+    scoped = _SCOPED.get()
+    return scoped.customers if scoped is not None else _customers
+
+
+def _current_tickets() -> dict[str, dict[str, Any]]:
+    scoped = _SCOPED.get()
+    return scoped.tickets if scoped is not None else _tickets
 
 
 # --------------------------------------------------------------------- schemas
@@ -197,21 +253,37 @@ def _money(value: float) -> str:
 
 def _customer_name(customer_id: str) -> str:
     """A person's name, falling back to the identifier only if it is unknown."""
-    customer = _customers.get(customer_id)
+    customer = _current_customers().get(customer_id)
     return customer["name"] if customer else customer_id
 
 
+def _status_predicate(status: str) -> tuple[str, str]:
+    """"está entregue" / "is delivered", for the Portuguese and English sentence.
+
+    A status outside the vocabulary -- set by an approved update to whatever
+    the request named -- is quoted as data rather than dropped into the
+    sentence as if it were a word: "está updated" read as broken Portuguese,
+    when what it meant was "the status field holds the value 'updated'".
+    """
+    if status in _WORDS["order_status"]["en"]:
+        return (
+            f"está {_WORDS['order_status']['pt'][status]}",
+            f"is {_WORDS['order_status']['en'][status]}",
+        )
+    return (f"está com o status “{status}”", f"has the status “{status}”")
+
+
 def _order_phrase(order: dict[str, Any]) -> str:
-    status = _word('order_status', order['status'])
+    pt, en = _status_predicate(order["status"])
     return pick(
-        f"o pedido de {_money(order['total_brl'])} está {status}",
-        f"the {_money(order['total_brl'])} order is {status}",
+        f"o pedido de {_money(order['total_brl'])} {pt}",
+        f"the {_money(order['total_brl'])} order {en}",
     )
 
 
 def get_order(order_id: str) -> dict[str, Any]:
     require_gateway("get_order")
-    order = _orders.get(order_id)
+    order = _current_orders().get(order_id)
     if order is None:
         return {"found": False, "order_id": order_id}
     result = copy.deepcopy(order)
@@ -222,11 +294,10 @@ def get_order(order_id: str) -> dict[str, Any]:
     # carries every identifier, so the trace and any caller that wants the
     # structure keep exactly what they had.
     who = _customer_name(order["customer_id"])
-    status = _word('order_status', order['status'])
+    pt, en = _status_predicate(order["status"])
     summary = pick(
-        f"O pedido de {who}, no valor de {_money(order['total_brl'])}, "
-        f"está {status}.",
-        f"{who}'s order, worth {_money(order['total_brl'])}, is {status}.",
+        f"O pedido de {who}, no valor de {_money(order['total_brl'])}, {pt}.",
+        f"{who}'s order, worth {_money(order['total_brl'])}, {en}.",
     )
     if order.get("tracking") and order["status"] in ("shipped", "delivered"):
         summary += pick(
@@ -238,7 +309,7 @@ def get_order(order_id: str) -> dict[str, Any]:
 
 def get_customer(customer_id: str) -> dict[str, Any]:
     require_gateway("get_customer")
-    customer = _customers.get(customer_id)
+    customer = _current_customers().get(customer_id)
     if customer is None:
         return {"found": False, "customer_id": customer_id}
     tier = _word('tier', customer['tier'])
@@ -262,10 +333,10 @@ def list_customer_orders(customer_id: str) -> dict[str, Any]:
     for no benefit.
     """
     require_gateway("list_customer_orders")
-    if customer_id not in _customers:
+    if customer_id not in _current_customers():
         return {"found": False, "customer_id": customer_id}
     matches = sorted(
-        (o for o in _orders.values() if o["customer_id"] == customer_id),
+        (o for o in _current_orders().values() if o["customer_id"] == customer_id),
         key=lambda o: o["placed_on"],
         reverse=True,
     )
@@ -328,7 +399,8 @@ def find_customer(name: str) -> dict[str, Any]:
         return {"found": False, "query": name, "matches": []}
 
     matches: list[dict[str, Any]] = []
-    for customer in _customers.values():
+    orders = _current_orders()
+    for customer in _current_customers().values():
         if term not in customer["name"].casefold():
             continue
         record = copy.deepcopy(customer)
@@ -342,7 +414,7 @@ def find_customer(name: str) -> dict[str, Any]:
                 ),
             }
             for order in sorted(
-                (o for o in _orders.values() if o["customer_id"] == customer["customer_id"]),
+                (o for o in orders.values() if o["customer_id"] == customer["customer_id"]),
                 key=lambda o: o["order_id"],
             )
         ]
@@ -400,7 +472,7 @@ def find_customer(name: str) -> dict[str, Any]:
 
 def get_ticket(ticket_id: str) -> dict[str, Any]:
     require_gateway("get_ticket")
-    ticket = _tickets.get(ticket_id)
+    ticket = _current_tickets().get(ticket_id)
     if ticket is None:
         return {"found": False, "ticket_id": ticket_id}
     status = _word('ticket_status', ticket['status'])
@@ -423,7 +495,7 @@ def get_ticket(ticket_id: str) -> dict[str, Any]:
 
 def update_record(record_id: str, field: str, value: str) -> dict[str, Any]:
     require_gateway("update_record")
-    order = _orders.get(record_id)
+    order = _current_orders().get(record_id)
     if order is None:
         return {"updated": False, "reason": "record not found", "record_id": record_id}
     if field not in order:
@@ -459,8 +531,9 @@ def send_email(to: str, subject: str, body: str) -> dict[str, Any]:
 
 def delete_record(record_id: str) -> dict[str, Any]:
     require_gateway("delete_record")
-    existed = record_id in _orders
-    _orders.pop(record_id, None)
+    orders = _current_orders()
+    existed = record_id in orders
+    orders.pop(record_id, None)
     return {"deleted": existed, "record_id": record_id, "simulated": True}
 
 

@@ -60,6 +60,7 @@ class Tracer:
         max_payload_chars: int = 500,
         known_secrets: tuple[str, ...] = (),
         observer: EventObserver | None = None,
+        start_sequence: int = 0,
     ) -> None:
         self._repository = repository
         self._observer = observer
@@ -67,7 +68,12 @@ class Tracer:
         self.trace_id = trace_id
         self._max_payload_chars = max_payload_chars
         self._known_secrets = tuple(s for s in known_secrets if s)
-        self._sequence = 0
+        # A request that resumes after a confirmation gets a new Tracer, but it
+        # is still one request: its events continue the sequence already
+        # persisted instead of restarting at 1. Restarting produced two events
+        # numbered 1, two numbered 2 and so on, and every reader that orders by
+        # sequence interleaved the two halves of the timeline.
+        self._sequence = max(0, start_sequence)
         self._lock = threading.Lock()
         self._sanitization_findings: list[str] = []
 

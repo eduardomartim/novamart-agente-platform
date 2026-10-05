@@ -22,6 +22,7 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from ..security.resources import charge_current_llm_attempt
 from ..security.sanitization import sanitize_text
 from .authorization import require_live_authorisation
 from .budget import ProviderBudget, ProviderBudgetExhausted
@@ -266,6 +267,12 @@ class GeminiProvider:
                 temperature=temperature,
                 include_thinking=self._thinking_supported,
             )
+            # The per-request ceiling on attempts, checked before the day's
+            # allowance because it is the cheaper refusal and the narrower
+            # scope. No-op outside a request: a judge or a CLI probe has no
+            # per-request ledger and never had one.
+            charge_current_llm_attempt()
+
             # Charged per *physical* attempt, not per logical call. A retry
             # spends quota exactly like a first try, so it is charged exactly
             # like one -- and refused when the day's allowance cannot afford

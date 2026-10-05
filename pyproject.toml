@@ -12,7 +12,7 @@ dependencies = [
     "pydantic>=2.13,<3.0",
     "python-dotenv>=1.0,<2.0",
     # Vector storage and exact cosine similarity. Present transitively via
-    # pandas already, but pandas is a `dashboard` extra -- the retrieval layer
+    # the dashboard's dependencies already, but those are an extra -- the retrieval layer
     # is core, so it declares what it actually imports rather than relying on
     # someone else's dependency happening to be installed.
     "numpy>=1.26,<3.0",
@@ -21,10 +21,11 @@ dependencies = [
 [project.optional-dependencies]
 dashboard = [
     "streamlit>=1.62,<2.0",
-    # Imported directly by dashboard/app.py. Streamlit happens to pull it
-    # in today, but depending on a transitive dependency means the app
-    # breaks silently if Streamlit ever drops it.
-    "pandas>=2.0,<3.0",
+    # Imported directly by dashboard/app.py for the latency chart. Streamlit
+    # happens to pull it in today, but depending on a transitive dependency
+    # means the app breaks silently if Streamlit ever drops it. (pandas is not
+    # listed: nothing in the dashboard imports it; it arrives with Streamlit.)
+    "altair>=5.5,<7",
 ]
 api = [
     # Starlette rather than FastAPI: the core is synchronous, so FastAPI's

@@ -1,0 +1,61 @@
+# Build context for the DASHBOARD image only.
+#
+# BuildKit gives a Dockerfile its own ignore file when one is named after it,
+# which is what lets the production `.dockerignore` stay exactly as strict as it
+# is. That file is written for the API image and it excludes three things this
+# build cannot do without: `dashboard/`, `requirements-dashboard.txt`, and
+# `.streamlit/` -- the last one named explicitly, because the API has no pages
+# to render and no reason to carry a Streamlit config.
+#
+# Without this file every one of those COPY instructions would find nothing and
+# the build would fail. Same deny-by-default posture, same credential
+# exclusions; only the allow-list differs, and it differs because the two images
+# ship different products.
+
+*
+
+# --- what the dashboard image actually needs --------------------------------
+# The package, which the app puts on sys.path itself rather than installing.
+!src/
+
+# The pages.
+!dashboard/
+
+# The hardening configuration. `showErrorDetails`, `toolbarMode` and
+# `gatherUsageStats` are security settings: an image built without this file
+# renders tracebacks, and their absolute paths, into a visitor's browser.
+!.streamlit/
+
+# The dependency manifests. Both, because the first includes the second.
+!requirements-dashboard.txt
+!requirements-api.txt
+
+# The persisted vector index. Demo traffic never opens it -- stub mode is BM25
+# over FTS5 -- but hybrid retrieval needs it once a provider is configured.
+!data/kb_vectors.db
+
+# --- re-excluded, even under the paths added back above ---------------------
+# `*` does not reach inside an un-ignored directory, so these need their own
+# exclusions.
+src/**/__pycache__/
+src/**/*.pyc
+src/**/*.pyo
+dashboard/**/__pycache__/
+dashboard/**/*.pyc
+dashboard/**/*.pyo
+
+# --- never, under any circumstance ------------------------------------------
+# Already covered by `*`. Named anyway, because this file is read by people
+# deciding whether a secret can reach the daemon, and "it is implied by a
+# wildcard three screens up" is not the answer that question deserves.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+.git/
+.gitignore
+secrets/
+**/secrets/

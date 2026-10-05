@@ -229,7 +229,13 @@ def test_rate_limited_request_never_enters_the_graph(settings):
 
 
 def test_oversized_input_is_rejected_before_any_model_call(settings):
-    small = replace(settings, max_input_chars=20)
+    # `max_question_chars`, not `max_input_chars`. The two were one setting
+    # until the question field gained its own 100-character ceiling; the second
+    # is the *context* budget that `fence_context` clips retrieved fields to,
+    # and narrowing that to bound a question would truncate documents instead.
+    # The property under test is unchanged: an oversized question is refused
+    # before any model call.
+    small = replace(settings, max_question_chars=20)
     platform = AgentPlatform(small, repository=InMemoryRepository())
     try:
         result = platform.run("x" * 100)

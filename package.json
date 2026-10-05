@@ -1,0 +1,14 @@
+{
+  "name": "novamart-visual-checks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser layout checks for the NovaMart dashboard. Node is used only for these; the project itself is Python.",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "visual": "node tests/visual/check_layout.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.0"
+  }
+}

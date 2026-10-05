@@ -488,15 +488,25 @@ def _compose_response(state: AgentState) -> tuple[str, str]:
 
     if state.get("status") == "declined":
         return (
-            "The action was not carried out because it was declined during review.",
+            pick(
+                "A ação não foi executada porque foi recusada na revisão.",
+                "The action was not carried out because it was declined during review.",
+            ),
             "declined",
         )
 
     if decision.get("decision") == "deny":
         rules = ", ".join(decision.get("rule_ids") or []) or "policy"
+        # The reason is the rule's own text and stays as the engine wrote it;
+        # the sentence around it is the reader's language.
+        reason = decision.get("reason", "not permitted")
         return (
-            f"That request was refused by the platform's policy engine ({rules}). "
-            f"Reason: {decision.get('reason', 'not permitted')}",
+            pick(
+                f"O pedido foi recusado pelo motor de políticas da plataforma "
+                f"({rules}). Motivo: {reason}",
+                f"That request was refused by the platform's policy engine ({rules}). "
+                f"Reason: {reason}",
+            ),
             "blocked",
         )
 
@@ -504,19 +514,30 @@ def _compose_response(state: AgentState) -> tuple[str, str]:
         body = _summarise_output(result.get("output"))
         note = ""
         if result.get("simulated"):
-            note = " (this tool is simulated: no external system was contacted)"
+            note = pick(
+                " (esta ferramenta é simulada: nenhum sistema externo foi contatado)",
+                " (this tool is simulated: no external system was contacted)",
+            )
         if validation and not validation.get("approved", True):
             reasons = "; ".join(validation.get("reasons") or [])
             return (
-                f"The action completed but did not pass validation ({reasons}). "
-                f"Result: {body}{note}",
+                pick(
+                    f"A ação foi concluída, mas não passou na validação ({reasons}). "
+                    f"Resultado: {body}{note}",
+                    f"The action completed but did not pass validation ({reasons}). "
+                    f"Result: {body}{note}",
+                ),
                 "failed",
             )
         return f"{body}{note}", "success"
 
     if result:
+        cause = result.get("error") or result.get("status")
         return (
-            f"The action could not be completed: {result.get('error') or result.get('status')}.",
+            pick(
+                f"A ação não pôde ser concluída: {cause}.",
+                f"The action could not be completed: {cause}.",
+            ),
             "failed",
         )
 
@@ -555,7 +576,13 @@ def _compose_response(state: AgentState) -> tuple[str, str]:
 
     errors = state.get("errors") or []
     if errors:
-        return f"The request could not be completed: {errors[-1]}", "failed"
+        return (
+            pick(
+                f"O pedido não pôde ser concluído: {errors[-1]}",
+                f"The request could not be completed: {errors[-1]}",
+            ),
+            "failed",
+        )
 
     # Nothing ran and nothing was retrieved. That is not a completed request,
     # and reporting `success` here is how an unanswerable question came back

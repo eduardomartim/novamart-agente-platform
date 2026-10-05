@@ -8,43 +8,44 @@ it from.
 
 The company is a name and a framing. The customers, orders, products, tickets
 and shipments underneath are exactly the ones the agents can reason about.
+
+Two names live here and they are not interchangeable. `PRODUCT_NAME` is
+NovaMart, the orchestrator; `COMPANY_NAME` is HDstore, the fictional retailer it
+is demonstrated on. They used to be the same string, which read on the landing
+page as though the retailer were the thing being sold.
 """
 
 from __future__ import annotations
 
 from typing import Any, Final
 
+# The architecture scene's script and labels, kept in their own modules
+# because ten workflows is a lot of prose. Imported under `_PT_` names and
+# read through `globals()` by the module `__getattr__` below -- which is
+# why ruff cannot see the use, and why the public names must stay absent
+# from this module: a module `__getattr__` never fires for a name that
+# already resolves.
+from arch_pt import ARCH_HEADINGS as _PT_ARCH_HEADINGS  # noqa: F401
+from arch_pt import ARCH_NODES as _PT_ARCH_NODES  # noqa: F401
+from arch_pt import ARCH_SCENARIOS as _PT_ARCH_SCENARIOS  # noqa: F401
 from i18n import current_locale
 
 from agent_platform.tools import dataset as data
 
-COMPANY_NAME = "NovaMart"
-_PT_COMPANY_TAGLINE = "Varejo de eletrônicos e equipamentos de trabalho, Brasil"
+#: The product. NovaMart is the orchestrator this project *is* -- the thing
+#: that was built, and the only thing the landing page is about.
+PRODUCT_NAME = "NovaMart"
+PRODUCT_TAGLINE = "AI Agent Orchestrator"
+#: The category line over the headline. English in both locales on purpose:
+#: it is how the product describes itself, the way "AI Agent Orchestrator"
+#: is, and a translated category would read as a different product.
+PRODUCT_CATEGORY = "AI Agent Orchestration Platform"
 
-PRODUCT_NAME = "AI Agent Orchestrator"
-PRODUCT_LINE = (
-    "An interactive enterprise simulation where specialised AI agents "
-    "collaborate on customer, order and support workflows -- with policy "
-    "enforcement and security controls."
-)
-
-ELEVATOR = (
-    "A support operations team receives questions about orders, customers and "
-    "tickets all day. Some are simple lookups; some ask for changes that must "
-    "not happen without a human saying yes; some are attempts to talk the "
-    "system into something it should refuse. This console shows specialised AI "
-    "agents handling that queue, with a policy engine deciding what is actually "
-    "allowed to run."
-)
-
-#: What is real and what is not. Stated once, prominently, and never blurred.
-HONESTY = (
-    "Everything below is a simulation. The company is fictional, the dataset is "
-    "generated and deterministic, and every tool operates in memory -- no email "
-    "is sent, no external system is contacted, no real customer exists."
-)
-
-
+#: The demonstration environment, and nothing else. HDstore is invented: a
+#: retailer with a dataset realistic enough to ask real questions of, so the
+#: product has somewhere to be shown working. It is never the product, and the
+#: page that describes it says so before it says anything else.
+COMPANY_NAME = "HDstore"
 # --------------------------------------------------------------- the agents
 
 #: The five agents that actually exist, in the order a request meets them.
@@ -94,15 +95,6 @@ _PT_AGENT_ROLES: list[dict[str, str]] = [
                  "não consulta nem altera nada.",
     },
 ]
-
-POLICY_ROLE = {
-    "title": "Policy engine",
-    "job": "The only authority on whether an action may run. It decides ALLOW, "
-           "REQUIRE_CONFIRMATION or DENY from the tool's own metadata and the "
-           "agent's capabilities -- never from anything the model claims.",
-    "holds": "Not an agent. It holds no tools and answers to no prompt.",
-}
-
 
 # ------------------------------------------------------- example questions
 #
@@ -360,6 +352,39 @@ def products_table() -> list[dict[str, Any]]:
     ]
 
 
+def shipments_table() -> list[dict[str, Any]]:
+    """Shipments were in the dataset and not on the page.
+
+    The agents can already answer about them -- `get_shipment` has existed all
+    along -- so a visitor reading the data explorer was being shown less than
+    the tools can reach.
+    """
+    return [
+        {
+            "ID": s["shipment_id"],
+            "Order": s["order_id"],
+            "Carrier": s["carrier"],
+            "State": s["state"],
+            "Shipped on": s["shipped_on"],
+            "Delivered on": s["delivered_on"] or "-",
+        }
+        for s in sorted(data.SHIPMENTS.values(), key=lambda s: s["shipment_id"])
+    ]
+
+
+def kb_table() -> list[dict[str, Any]]:
+    """The knowledge base, as titles rather than as prose.
+
+    The bodies are what retrieval searches; showing them in full would turn a
+    data explorer into a document reader. The title and its length are enough
+    to say what is in there and that it is real text.
+    """
+    return [
+        {"Article": article["title"], "Characters": len(article["body"])}
+        for article in data.KB_ARTICLES
+    ]
+
+
 def tickets_table() -> list[dict[str, Any]]:
     return [
         {
@@ -396,21 +421,6 @@ EVENT_LABELS: dict[str, str] = {
     "rate_limited": "Rate limit applied",
     "request_completed": "Response returned",
     "request_failed": "Request failed",
-}
-
-
-def describe_event(event_type: str) -> str:
-    return EVENT_LABELS.get(event_type, event_type.replace("_", " ").capitalize())
-
-
-STATUS_MEANING: dict[str, str] = {
-    "success": "Completed. The request was answered.",
-    "awaiting_confirmation": "Suspended. A human must approve before anything runs.",
-    "blocked": "Refused by the policy engine. No tool ran.",
-    "rejected": "Refused before reaching an agent.",
-    "rate_limited": "Refused because the request quota was exhausted.",
-    "failed": "The request could not be completed.",
-    "declined": "A human declined the action.",
 }
 
 
@@ -496,45 +506,6 @@ _PT_NOT_BUILT: list[tuple[str, str]] = [
 # price and warranty and **no stock level**, so nothing here implies inventory
 # questions the agents cannot answer.
 
-WHAT_YOU_CAN_TEST: list[tuple[str, str, str]] = [
-    (
-        "Customers",
-        "Ask about a person by name or by ID, and see their order history.",
-        'Try: "Mostre os pedidos de Ana Ribeiro"',
-    ),
-    (
-        "Orders",
-        "Check a status, or ask for a change and watch it stop for approval.",
-        'Try: "Atualize o status do pedido ORD-1002 para entregue"',
-    ),
-    (
-        "Tickets",
-        "Investigate an open support issue and the order behind it.",
-        'Try: "Sobre o que é o ticket TKT-4002?"',
-    ),
-    (
-        "Products",
-        "Ask about catalogue details -- price, category and warranty. "
-        "The catalogue carries no stock levels, so inventory questions have "
-        "no answer here.",
-        'Try: "Qual é a política de reembolso?"',
-    ),
-]
-
-#: One honest paragraph, reused wherever a visitor is about to run something.
-STUB_VS_LIVE = (
-    "**Simulation mode** answers from a deterministic local stub: no AI "
-    "provider is called, and the same run always produces the same result.\n\n"
-    "**Live mode** puts Gemini in charge of the *decisions* -- which route a "
-    "request takes, which tool to use and with what arguments. Everything "
-    "after that is unchanged: the same policy engine, the same gateway, the "
-    "same confirmation gate and the same budget.\n\n"
-    "The wording of the final answer is composed by the platform in **both** "
-    "modes, so switching to live does not turn the reply into model-written "
-    "prose -- it changes which tool was chosen to produce it."
-)
-
-
 # ------------------------------------------------------------------- locale
 #
 # The collections above are the Portuguese originals. `content_en` mirrors the
@@ -553,7 +524,6 @@ STUB_VS_LIVE = (
 
 _TRANSLATED: Final[frozenset[str]] = frozenset(
     {
-        "COMPANY_TAGLINE",
         "AGENT_ROLES",
         "READ_ONLY_EXAMPLES",
         "ACTION_EXAMPLES",
@@ -561,6 +531,9 @@ _TRANSLATED: Final[frozenset[str]] = frozenset(
         "SCENARIOS",
         "DEMONSTRATED",
         "NOT_BUILT",
+        "ARCH_NODES",
+        "ARCH_HEADINGS",
+        "ARCH_SCENARIOS",
     }
 )
 

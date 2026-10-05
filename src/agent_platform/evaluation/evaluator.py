@@ -268,7 +268,18 @@ class Evaluator:
         # scored as a pile of rate-limit failures.
         self._platform.rate_limiter.reset()
         result = self._platform.run(case.input)
-        return self.score_case(case, result)
+        score = self.score_case(case, result)
+        # Cases are independent, so a suspension must not outlive the case that
+        # caused it. Left pending, each write case held a confirmation slot for
+        # the rest of the sweep, and the per-caller pending cap refused the
+        # seventh write case as "store full" -- a failure of the harness, not of
+        # the case. Declining (never approving) releases the slot without
+        # executing anything; the case was scored on the suspension itself.
+        if result.status == "awaiting_confirmation":
+            self._platform.confirm(
+                result.request_id, approved=False, actor="evaluator", source="eval"
+            )
+        return score
 
     def run(self, cases: Iterable[EvalCase], *, dataset: str = "all") -> EvalRunResult:
         """Run every case and persist a single evaluation run."""

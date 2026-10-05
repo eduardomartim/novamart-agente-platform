@@ -101,15 +101,33 @@ live model provider"*.
 
 ## Current results (deterministic stub, no API key)
 
+Measured 2026-10-03, Python 3.12.13, `agent-platform eval`:
+
 ```
 cases        68
 passed       68
 safety       1.0000
-correctness  1.0000
+correctness  0.9875
 tool_accuracy 1.0000
 relevance    not available
-overall      1.0000
+overall      0.9963
 ```
+
+Correctness is below 1 because of one case that passes but is scored half-right:
+`reg-006`, "Hello there", expects `success` and gets `declined` -- the platform
+refuses a greeting with the same honest "I cannot answer that" it gives any
+question nothing can serve, instead of greeting back. It is a product decision
+left open, not a regression.
+
+Before this run the sweep stood at **65/68**, and this document claimed 68/68
+for a version that no longer produced it. The cause was in the stub, not the
+platform: "pedido 1002" was not recognised as an order identifier, and
+sentence-opening verbs ("Search", "Consultar", "Notify") were read as a person's
+name -- which also turned two write requests into reads that reported success
+without asking for confirmation. Fixed in `llm/stub.py`, with the evaluator
+releasing each case's pending confirmation so a sweep's seventh write case is no
+longer refused by the per-caller cap. Regression tests:
+`tests/unit/test_stub_intent_regressions.py`.
 
 **Read this honestly.** A perfect score against a deterministic stub measures
 that the *platform* behaves correctly given predictable model output. It does

@@ -19,9 +19,18 @@ from .provider import Embedding, EmbedTask, LLMResponse, Purpose, estimate_token
 STUB_PROVIDER_NAME = "stub"
 STUB_MODEL_NAME = "deterministic-stub-v1"
 
-_ORDER_ID = re.compile(r"\b(?:ord[-_]?|order\s+(?:id\s+)?#?)(\d{3,8})\b", re.I)
-_CUSTOMER_ID = re.compile(r"\b(?:cus[-_]?|customer\s+(?:id\s+)?#?)(\d{3,8})\b", re.I)
-_TICKET_ID = re.compile(r"\b(?:tkt[-_]?|ticket\s+(?:id\s+)?#?)(\d{3,8})\b", re.I)
+# The Portuguese nouns sit beside the English ones. Without them "status do
+# pedido 1002" carried no identifier at all, so the lookup was declined as
+# unanswerable -- and "consultar o pedido 1001" fell through to a name search.
+_ORDER_ID = re.compile(
+    r"\b(?:ord[-_]?|(?:order|pedido)\s+(?:id\s+|n[º°o]\.?\s*)?#?)(\d{3,8})\b", re.I
+)
+_CUSTOMER_ID = re.compile(
+    r"\b(?:cus[-_]?|(?:customer|cliente)\s+(?:id\s+|n[º°o]\.?\s*)?#?)(\d{3,8})\b", re.I
+)
+_TICKET_ID = re.compile(
+    r"\b(?:tkt[-_]?|(?:ticket|chamado)\s+(?:id\s+|n[º°o]\.?\s*)?#?)(\d{3,8})\b", re.I
+)
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
 #: Prompts fence the end user's text. Keyword matching must run against that
@@ -237,6 +246,9 @@ _ACTION_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("get_customer", ("customer", "cliente", "account holder", "profile")),
 )
 
+#: The entries above that change something rather than read it.
+_WRITE_TOOLS = frozenset({"delete_record", "send_email", "update_record"})
+
 
 #: A person's name, written the way people write one: "Ana Ribeiro", or
 #: "Ana's" in the possessive. Matching a proper noun rather than consulting the
@@ -255,6 +267,13 @@ _NOT_A_NAME = frozenset(
         "Customer", "Ticket", "Product", "Status", "All", "Every", "Refund",
         "Qual", "Quais", "Mostre", "Onde", "Como", "Porque", "Pedido",
         "Cliente", "Chamado",
+        # Imperatives that open a request. Capitalised only because they start
+        # the sentence: "Search for the refund policy" was a customer search
+        # for somebody called Search, and "Consultar o pedido 1001" one for
+        # somebody called Consultar.
+        "Search", "Look", "Check", "Get", "Consultar", "Consulte", "Buscar",
+        "Busque", "Procurar", "Procure", "Pesquisar", "Pesquise", "Verificar",
+        "Verifique", "Mostrar", "Listar", "Liste", "Ver", "Veja",
     }
 )
 
@@ -269,6 +288,43 @@ def _person_name(text: str) -> str | None:
             second = None
         return f"{first} {second}" if second else first
     return None
+
+
+#: Order statuses as a request names them, in both languages, mapped to the
+#: value the dataset stores.
+_STATUS_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("delivered", "entregue"), "delivered"),
+    (("shipped", "enviado", "despachado"), "shipped"),
+    (("cancel",), "cancelled"),
+    (("returned", "devolvid"), "returned"),
+    (("processing", "pendente", "em processamento"), "processing"),
+)
+
+_TARGET_CLAUSE = re.compile(r"\b(?:to|para|como)\s+(.+)$", re.I | re.S)
+
+
+def _target_status(text: str) -> str:
+    """The status an update request asks for.
+
+    The stub used to propose the literal ``"updated"`` whatever was asked, so
+    "update order 1002 to delivered", once approved, set the order's status to
+    the word "updated" and the next lookup read back "está updated". The value
+    now comes from the request: a recognised status in either language, or else
+    the word the request gave after "to"/"para". Only a request that names no
+    target at all keeps the placeholder, and the order summary quotes a value
+    it does not recognise rather than passing it off as a status.
+    """
+    clause = _TARGET_CLAUSE.search(text)
+    target = clause.group(1) if clause else text
+    lowered = target.lower()
+    for words, status in _STATUS_WORDS:
+        if any(word in lowered for word in words):
+            return status
+    if clause:
+        word = re.match(r"[\wÀ-ÿ\-]+", clause.group(1).strip())
+        if word:
+            return word.group(0).lower()[:40]
+    return "updated"
 
 
 def _first_group(pattern: re.Pattern[str], text: str, default: str) -> str:
@@ -343,13 +399,17 @@ class StubProvider:
                 return True
             if request.strip().rstrip("?.!").strip() == name:
                 return True
-            return any(
+            if any(
                 word in lowered
                 for word in (
                     "customer", "client", "cliente", "order", "pedido",
                     "ticket", "chamado", "about", "sobre", "conta", "account",
                 )
-            )
+            ):
+                return True
+            # Not a name lookup -- but that says nothing about whether it is a
+            # documentation question, so fall through to that check rather than
+            # refusing here.
         # A documentation question. `search` takes free text, so it can always
         # be attempted -- and when the corpus holds nothing, the answer node
         # says so rather than inventing coverage.
@@ -437,12 +497,31 @@ class StubProvider:
 
         matched: str | None = None
 
+        # A write the calling agent may propose. Decided first because the two
+        # read-side shortcuts below must never swallow one: "change order 1001
+        # to refunded" was turned into a document search by the subject guard,
+        # and "Notify bruno@... that his order shipped" into a customer search
+        # for somebody called Notify -- each reporting success for an action
+        # that needed a human's confirmation and never got proposed.
+        write_tool = next(
+            (
+                tool
+                for tool, keywords in _ACTION_KEYWORDS
+                if tool in _WRITE_TOOLS
+                and (not offered or tool in offered or tool == "delete_record")
+                and any(keyword in lowered for keyword in keywords)
+            ),
+            None,
+        )
+
         # The same guard the router applies. Reached when a request carrying an
         # identifier also mentions an unsupported subject -- "was ORD-1001
         # refunded?" -- where the identifier alone would otherwise make it look
         # answerable.
-        if _UNSUPPORTED_SUBJECTS.search(request) and not _DOCUMENTED_SUBJECTS.search(
-            request
+        if (
+            write_tool is None
+            and _UNSUPPORTED_SUBJECTS.search(request)
+            and not _DOCUMENTED_SUBJECTS.search(request)
         ):
             return "search", {"query": request[:200]}
 
@@ -466,14 +545,11 @@ class StubProvider:
         ):
             matched = "list_customer_orders"
         elif (
-            not _CUSTOMER_ID.search(request)
+            write_tool is None
+            and not _CUSTOMER_ID.search(request)
             and not _ORDER_ID.search(request)
             and not _TICKET_ID.search(request)
             and _person_name(request) is not None
-            and not any(
-                word in lowered
-                for word in ("delete", "remove", "update", "change", "send", "email")
-            )
         ):
             # The request names a person and carries no identifier, so the only
             # read that can answer it is the one that resolves a name.
@@ -581,7 +657,7 @@ class StubProvider:
             return {
                 "record_id": f"ORD-{_first_group(_ORDER_ID, prompt, '1001')}",
                 "field": "status",
-                "value": "updated",
+                "value": _target_status(prompt),
             }
         if tool == "delete_record":
             return {"record_id": f"ORD-{_first_group(_ORDER_ID, prompt, '1001')}"}

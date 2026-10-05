@@ -64,7 +64,11 @@ class ExecutorAgent(BaseAgent):
         # it must not be fenced again here -- a second pass would strip the
         # inner markers and collapse the per-field boundaries back into one.
         context_block = (
-            fence_context(context, max_chars=self.deps.settings.max_input_chars)
+            fence_context(
+                context,
+                max_chars=self.deps.settings.max_input_chars,
+                max_total_chars=self.deps.settings.max_context_total_chars,
+            )
             if context
             else "(no context was gathered)"
         )

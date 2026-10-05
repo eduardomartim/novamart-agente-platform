@@ -63,6 +63,7 @@ from ..security.api_auth import (
     principal_scope,
 )
 from .schemas import (
+    MAX_BODY_BYTES,
     ConfirmRequest,
     ErrorResponse,
     HealthResponse,
@@ -138,6 +139,43 @@ def _first_validation_message(exc: ValidationError) -> str:
             "authenticated credential, not from the request body."
         )
     return f"{location}: {first.get('msg', 'is invalid')}"
+
+
+class _BodyTooLarge(Exception):
+    """A body over :data:`MAX_BODY_BYTES`, refused before it was buffered."""
+
+
+async def _read_body(request: Request, limit: int = MAX_BODY_BYTES) -> bytes:
+    """Read the body, refusing it as soon as it is known to exceed *limit*.
+
+    ``request.body()`` buffers whatever arrives, so a client could make the
+    process hold an arbitrarily large body before any validation ran. A declared
+    ``Content-Length`` over the limit is refused without reading a byte; a body
+    that lies about its length, or is chunked, is refused at the first chunk
+    that crosses the limit, so at most ``limit`` plus one chunk is ever held.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            length = int(declared)
+        except ValueError as exc:
+            raise _BadRequest("Content-Length is not an integer") from exc
+        if length > limit:
+            raise _BodyTooLarge
+    received = bytearray()
+    async for chunk in request.stream():
+        received.extend(chunk)
+        if len(received) > limit:
+            raise _BodyTooLarge
+    return bytes(received)
+
+
+def _body_too_large() -> JSONResponse:
+    return _error(
+        "payload_too_large",
+        f"request body exceeds {MAX_BODY_BYTES} bytes",
+        413,
+    )
 
 
 def _guarded(work: Callable[[], Response]) -> Response:
@@ -505,7 +543,14 @@ def create_app(
         )
 
     async def create_run(request: Request) -> Response:
-        raw = await request.body()
+        try:
+            raw = await _read_body(request)
+        except _BodyTooLarge:
+            counters.increment("agent_requests_total", status="4xx")
+            return _body_too_large()
+        except _BadRequest as exc:
+            counters.increment("agent_requests_total", status="4xx")
+            return _error("bad_request", exc.detail, 400)
         started = time.perf_counter()
         # Quota is charged to the principal, not to the credential: issuing
         # yourself a second key must not double your allowance.
@@ -522,7 +567,12 @@ def create_app(
         return response
 
     async def confirm_run(request: Request) -> Response:
-        raw = await request.body()
+        try:
+            raw = await _read_body(request)
+        except _BodyTooLarge:
+            return _body_too_large()
+        except _BadRequest as exc:
+            return _error("bad_request", exc.detail, 400)
         request_id = request.path_params["request_id"]
         principal = current_principal()
         # "unauthenticated" rather than a friendly default: when the platform

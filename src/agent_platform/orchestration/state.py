@@ -16,10 +16,6 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-#: Hard ceiling on executor retries. The graph also runs under LangGraph's
-#: recursion_limit, so there are two independent stops against looping.
-DEFAULT_MAX_RETRIES = 2
-
 
 class AgentState(TypedDict, total=False):
     """State threaded through the orchestration graph."""

@@ -33,6 +33,18 @@ from ..platform import RunResult
 #: have become a second validation path.
 MAX_INPUT_CHARS: Final[int] = 65_536
 
+#: Ceiling on an inbound body, in bytes, enforced *while it is read*.
+#:
+#: The character limit above is checked after parsing, which is after the whole
+#: body is already in memory -- it bounded what the platform was asked, not what
+#: the server would buffer to find out. This bound is applied to the stream, so
+#: a body that is too large is refused before it is held.
+#:
+#: Derived rather than chosen, so it can never refuse a body the schema would
+#: accept: the longest valid input, with every character JSON-escaped as a
+#: six-byte ``\\uXXXX``, plus room for the envelope.
+MAX_BODY_BYTES: Final[int] = MAX_INPUT_CHARS * 6 + 4_096
+
 
 class RunRequest(BaseModel):
     """A request for the platform to handle."""

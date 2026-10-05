@@ -10,6 +10,7 @@ place where the order of the request pipeline is visible:
 from __future__ import annotations
 
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,7 +32,7 @@ from .guardrails.input import InputAssessment, assess_input
 from .guardrails.policy import PolicyEngine
 from .llm import LLMProvider, build_provider, describe_provider
 from .llm.circuit import CircuitBreaker
-from .llm.provider import LLMError, ProviderInfo
+from .llm.provider import LLMError, ProviderInfo, RetryPolicy
 from .observability.events import EventStatus, EventType
 from .observability.tracing import (
     EventObserver,
@@ -54,8 +55,10 @@ from .security.resources import (
     ResourceGuard,
     ResourceLimitExceeded,
     ResourceLimits,
+    resource_scope,
 )
 from .security.sanitization import content_digest, sanitize_text
+from .security.secrets import known_secret_values
 from .state import (
     SharedPendingRegistry,
     SharedRateLimiter,
@@ -122,6 +125,34 @@ def _build_tool_transport(settings: Settings) -> Any:
     )
 
 
+def _llm_call_worst_case_seconds(settings: Settings) -> float:
+    """What one *logical* model call can cost in wall-clock, worst case.
+
+    Every physical attempt can burn its full timeout, and the provider sleeps
+    between them. Both figures come from the same ``RetryPolicy`` that
+    ``llm/__init__.py`` builds the provider with -- ``max_retries + 1``
+    attempts -- so the reservation and the retry loop cannot drift into
+    disagreeing about how long a call may take.
+    """
+    policy = RetryPolicy(max_attempts=settings.max_retries + 1)
+    backoff = sum(
+        policy.backoff_for(attempt) for attempt in range(1, policy.max_attempts)
+    )
+    return policy.max_attempts * settings.llm_timeout + backoff
+
+
+def _tool_call_worst_case_seconds(settings: Settings) -> float:
+    """What one tool invocation can cost, worst case.
+
+    The gateway waits on a future for the tool's own timeout, and tools are
+    never retried -- the registry holds non-idempotent operations, so a retry
+    there would repeat a side effect. That makes one timeout the whole story.
+    A tool that declares a longer ``timeout_seconds`` of its own would exceed
+    this; none does, and the registry is not model-controlled.
+    """
+    return settings.tool_timeout
+
+
 def _suspended_record(
     *,
     request_id: str,
@@ -129,6 +160,7 @@ def _suspended_record(
     user_input: str,
     usage: Any,
     now: float,
+    quota_key: str,
 ) -> SuspendedRun:
     """Snapshot a suspending run into something serialisable.
 
@@ -136,13 +168,21 @@ def _suspended_record(
     the graph, the tracer, the provider, the gathered context or any tool
     output -- the first three cannot cross a process and the last two are raw,
     pre-redaction data that resuming does not need.
+
+    ``quota_key`` joins that list for one reason: the pending store now shares
+    its capacity between callers, and a slot cannot be returned to whoever took
+    it unless the record says who that was. It is the same opaque bucket
+    identifier the rate limiter uses, never an address.
     """
     return SuspendedRun(
         request_id=request_id,
         trace_id=trace_id,
         user_input=user_input,
         created_at=time.time(),
+        quota_key=quota_key,
         llm_calls=getattr(usage, "llm_calls", 0) or 0,
+        llm_attempts=getattr(usage, "llm_attempts", 0) or 0,
+        embedding_calls=getattr(usage, "embedding_calls", 0) or 0,
         tool_calls=getattr(usage, "tool_calls", 0) or 0,
         tool_output_bytes=getattr(usage, "tool_output_bytes", 0) or 0,
         elapsed_seconds=usage.elapsed(now) if usage is not None else 0.0,
@@ -312,6 +352,25 @@ class AgentPlatform:
                 request_deadline_seconds=self.settings.request_deadline_seconds,
                 max_tool_output_bytes=self.settings.max_tool_output_bytes,
                 max_pending_confirmations=self.settings.max_pending_confirmations,
+                # A logical call may retry inside the provider, so the ceiling
+                # on requests actually leaving the process is the logical one
+                # multiplied by the attempts each is allowed. Derived from
+                # `max_retries`, which is what the provider's RetryPolicy is
+                # built from, rather than written down twice.
+                max_llm_attempts_per_request=(
+                    self.settings.max_llm_calls_per_request
+                    * (self.settings.max_retries + 1)
+                ),
+                # Retrieval embeds once per search, and a search is a tool
+                # call, so the tool ceiling is the honest bound on how many
+                # embeddings one request can ask for.
+                max_embedding_calls_per_request=(
+                    self.settings.max_tool_calls_per_request
+                ),
+                llm_call_worst_case_seconds=_llm_call_worst_case_seconds(self.settings),
+                tool_call_worst_case_seconds=_tool_call_worst_case_seconds(
+                    self.settings
+                ),
             )
         )
         self.circuit = CircuitBreaker(
@@ -340,10 +399,16 @@ class AgentPlatform:
         # Serialisable records, not live objects, and a consumption that is
         # atomic across replicas. See state/pending.py for why the entry
         # outlives its own expiry.
+        # Two ceilings. `max_entries` is capacity -- what the deployment will
+        # hold. `max_per_key` is fairness -- how much of it one caller may take.
+        # Capacity alone left the store first-come-first-served, and one visitor
+        # inside its own rate limit could take all of it, which refused every
+        # other visitor's high-risk action before a human ever saw it.
         self._pending = SharedPendingRegistry(
             self.shared_state.backend,
             max_entries=self.settings.max_pending_confirmations,
             ttl_seconds=self.settings.confirmation_ttl_seconds,
+            max_per_key=self.settings.effective_max_pending_per_quota_key,
         )
         self._use_judge = use_judge
 
@@ -355,8 +420,17 @@ class AgentPlatform:
 
     @property
     def _known_secrets(self) -> tuple[str, ...]:
-        key = self.settings.gemini_api_key
-        return (key,) if key else ()
+        # Every credential this process holds, not just the provider key. The
+        # grant secret has no recognisable shape at all, and a database or
+        # Redis password is only caught by pattern while it is still inside its
+        # URL -- so each is also redacted by identity.
+        settings = self.settings
+        return known_secret_values(
+            settings.gemini_api_key,
+            settings.execution_grant_secret,
+            settings.database_url,
+            settings.redis_url,
+        )
 
     def has_pending_confirmation(self, request_id: str) -> bool:
         """Whether a suspended action with this id is still resumable.
@@ -532,7 +606,15 @@ class AgentPlatform:
             )
 
         # 2. Input security.
-        assessment = assess_input(user_input, max_chars=self.settings.max_input_chars)
+        # The question's own ceiling, not the context budget. Checked here,
+        # before `resources.begin` and before the graph is built, so an
+        # oversized question reaches no router, no agent, no model and no tool.
+        # Rejected outright rather than trimmed: a question cut at 100
+        # characters is a different question, and answering it would be
+        # answering something the person did not ask.
+        assessment = assess_input(
+            user_input, max_chars=self.settings.max_question_chars
+        )
         if not assessment.accepted:
             tracer.event(
                 EventType.INPUT_REJECTED,
@@ -597,6 +679,10 @@ class AgentPlatform:
             assessment=assessment,
             started=started,
             user_input=user_input,
+            # The bucket this request is already spending from, read from the
+            # same ContextVar the limiter consulted a few lines above, so a
+            # suspension is charged to exactly the caller the request was.
+            quota_key=current_quota_key(),
         )
 
     def confirm(
@@ -648,6 +734,8 @@ class AgentPlatform:
             llm_calls=record.llm_calls,
             tool_calls=record.tool_calls,
             tool_output_bytes=record.tool_output_bytes,
+            llm_attempts=record.llm_attempts,
+            embedding_calls=record.embedding_calls,
             elapsed_seconds=record.elapsed_seconds,
         )
         command = Command(resume={"approved": approved, "actor": actor, "source": source})
@@ -660,6 +748,13 @@ class AgentPlatform:
             assessment=pending.input_assessment,
             started=pending.started_at,
             user_input=pending.user_input,
+            # The *requester's* bucket, taken from the record, not the
+            # approver's. A resumed run that suspends a second time is still
+            # the same person's request; charging it to whoever approved it
+            # would spend a reviewer's share on somebody else's work, and
+            # `confirm` runs outside `quota_scope` anyway, so the ambient
+            # value here would be the global bucket rather than either party.
+            quota_key=record.quota_key,
         )
 
     def _rehydrate(self, record: SuspendedRun) -> _ResumeContext:
@@ -675,14 +770,23 @@ class AgentPlatform:
         the reported latency stays a duration rather than a comparison between
         two unrelated clocks.
         """
+        # Continue the request's own sequence, read from the shared repository
+        # rather than from the pending record: the record is written before the
+        # suspension's last events are, and another replica may be the one
+        # resuming. The secrets list is the same one the first half used, so the
+        # events after a confirmation are redacted exactly like those before it.
+        persisted = self.repository.events_for_request(record.request_id)
+        last_sequence = max((int(e.get("sequence") or 0) for e in persisted), default=0)
         tracer = Tracer(
             self.repository,
             request_id=record.request_id,
             trace_id=record.trace_id,
             max_payload_chars=self.settings.max_trace_payload_chars,
+            known_secrets=self._known_secrets,
+            start_sequence=last_sequence,
         )
         assessment = assess_input(
-            record.user_input, max_chars=self.settings.max_input_chars
+            record.user_input, max_chars=self.settings.max_question_chars
         )
         graph = self._build_graph(tracer, assessment)
         started = time.perf_counter() - max(0.0, time.time() - record.created_at)
@@ -708,6 +812,7 @@ class AgentPlatform:
         assessment: InputAssessment,
         started: float,
         user_input: str,
+        quota_key: str,
     ) -> RunResult:
         config = {
             "configurable": {"thread_id": request_id},
@@ -728,7 +833,12 @@ class AgentPlatform:
         provider = None if self.settings.demo_mode else self.provider
 
         try:
-            with retrieval_provider(provider):
+            # `resource_scope` is what lets the provider charge a physical
+            # attempt: it runs inside its own retry loop, where there is no
+            # request id in scope, and threading one through would change a
+            # protocol three implementations share. Bound here, next to the
+            # retrieval provider, for exactly the same extent.
+            with retrieval_provider(provider), resource_scope(self.resources, request_id):
                 final = graph.invoke(payload, config=config)
         except BudgetExceededError as exc:
             # Raised before a model call that would breach a budget. The
@@ -876,6 +986,7 @@ class AgentPlatform:
                     user_input=user_input,
                     usage=self.resources.usage(request_id),
                     now=time.perf_counter(),
+                    quota_key=quota_key,
                 ),
             )
             if not stored:
@@ -987,6 +1098,36 @@ class AgentPlatform:
             provider=self.provider.name,
         )
 
+    def _release_checkpoint(self, request_id: str) -> None:
+        """Drop the graph checkpoint for a request that has finished.
+
+        The checkpointer is one object for the process and receives a thread per
+        request. Nothing removed those threads, so a local deployment grew by
+        one execution state per request served -- state for runs that had
+        already answered and could never be resumed.
+
+        Called only from ``_finish``, which is the terminal path: a run that
+        suspends for a human returns without reaching it, so its checkpoint --
+        the thing that makes the resume possible -- survives exactly as before.
+        The resume itself ends in ``_finish`` and cleans up then.
+
+        Shared deployments are left alone. There the checkpointer is Redis with
+        a TTL keyed to the confirmation window, which already collects what this
+        is for, and reaching into it would change a behaviour that is not
+        broken.
+
+        Best effort by construction: cleanup runs after the request's outcome is
+        settled, and a checkpointer that cannot delete must not turn a completed
+        request into a failed one.
+        """
+        if self.shared_state.is_shared:
+            return
+        # Suppressed on purpose. This runs after the answer already exists; a
+        # checkpointer that cannot delete is a leak to fix, never a reason to
+        # turn a completed request into a failed one.
+        with suppress(Exception):  # pragma: no cover - defensive
+            self._checkpointer.delete_thread(request_id)
+
     def _finish(
         self,
         *,
@@ -1002,6 +1143,7 @@ class AgentPlatform:
     ) -> None:
         self.budget_guard.release(request_id)
         self.resources.release(request_id)
+        self._release_checkpoint(request_id)
         self._persist_request(
             request_id=request_id,
             trace_id=trace_id,

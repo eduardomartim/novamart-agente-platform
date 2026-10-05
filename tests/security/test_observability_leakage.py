@@ -39,6 +39,9 @@ from starlette.testclient import TestClient
 from agent_platform.api import create_app
 from tests.conftest import bearer
 
+# Shaped like an AI Studio authorization key so the pattern redaction is what
+# is exercised, and spelled so that nobody -- and no secret scanner -- can
+# mistake it for one.
 FAKE_KEY = "AQ.FAKE_KEY_FOR_TESTS_ONLY_not_a_real_credential_0000"
 FAKE_SECRET = "an-execution-grant-signing-secret-value"
 

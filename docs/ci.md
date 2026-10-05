@@ -96,8 +96,8 @@ is the choice that keeps CI honest.
 |---|---|---|---|
 | `lint` | — | 5 min | |
 | `typecheck` | — | 10 min | installs every extra mypy is configured to check |
-| `offline` | — | 20 min | ~1500 tests; JUnit artifact |
-| `security` | — | 15 min | ~680 tests; JUnit artifact |
+| `offline` | — | 20 min | ~2200 tests; JUnit artifact |
+| `security` | — | 15 min | ~840 tests; JUnit artifact |
 | `live-gate` | — | 15 min | the incident re-enactment |
 | `manifests` | — | 5 min | renders, then greps for credential shapes |
 | `protected-files` | — | 5 min | `sha256sum -c PROTECTED.sha256`, plus a count check |

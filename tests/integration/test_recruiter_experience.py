@@ -28,6 +28,7 @@ if str(DASHBOARD) not in sys.path:
     sys.path.insert(0, str(DASHBOARD))
 
 import demo_content as demo  # noqa: E402
+from i18n import t  # noqa: E402
 
 APP = DASHBOARD / "app.py"
 
@@ -94,13 +95,27 @@ def test_landing_leads_with_identity_not_a_technical_warning(seeded_db):
 
     The provider banner used to render above the page header, so a stranger's
     first impression was a yellow box about a missing environment variable.
+
+    The identity moved above the headline rather than into it. `NovaMart` is
+    the eyebrow and the sidebar; the `<h1>` is what the product does, which is
+    the thing worth the largest type on the page. Both are pinned here -- an
+    identity with no proposition and a proposition with no identity are each a
+    way of failing this test.
+
+    `PRODUCT_NAME` and not `COMPANY_NAME`: the two used to be one string, and
+    the landing page led with "NovaMart — AI Agent Orchestrator" over a retail
+    tagline. NovaMart is the product; HDstore is the fictional retailer it is
+    demonstrated on, and it introduces itself on Empresa.
     """
     app = _render(seeded_db)
     titles = [e.value for e in app.title]
     assert titles, "the landing page has no title"
     first = titles[0]
-    assert demo.COMPANY_NAME in first, (
-        f"the landing page leads with {first!r} instead of the product identity"
+    assert first == t("hero.headline"), (
+        f"the landing page leads with {first!r} instead of the headline"
+    )
+    assert demo.PRODUCT_NAME in _main_text(app), (
+        "the landing page never names the product"
     )
     assert not list(app.main.warning), (
         "a warning banner renders in the main column of the landing page"
@@ -246,8 +261,10 @@ def test_navigation_puts_the_demo_before_the_technical_pages(seeded_db):
     app = _render(seeded_db)
     labels = list(app.radio(key="nav_pt").options)
 
-    assert labels[0] == dashboard_app.t("nav.overview"), (
-        "the guided entry point is not first"
+    # `endswith` and not `==`: every row now carries a leading glyph, and the
+    # grouping assertion below is the one that cares which glyph it is.
+    assert labels[0].endswith(dashboard_app.t("nav.overview")), (
+        f"the guided entry point is not first: {labels[0]!r}"
     )
 
     demo_count = len(dashboard_app.DEMO_PAGES)

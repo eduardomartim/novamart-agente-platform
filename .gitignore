@@ -26,7 +26,31 @@ __pycache__/
 build/
 dist/
 .venv/
+.venv-*/
 venv/
+
+# uv's resolver lock. Not the source of truth here: CI and the images install
+# from pyproject extras and the hashed `requirements-api.txt`, and a second lock
+# nobody installs from only drifts.
+uv.lock
+
+# Node is used only to drive the visual checks in tests/visual/; its packages
+# are reinstalled from package-lock.json, never committed.
+node_modules/
+
+# Visual-check output: screenshots and reports are evidence for one run, not
+# source. Written under tests/visual/artifacts/ by the script, and ignored at
+# the root in case a tool drops one there.
+tests/visual/artifacts/
+playwright-report/
+test-results/
+/*.png
+
+# Superseded ad-hoc validation scripts (replaced by tests/visual/) and an empty
+# scratch file. Listed so they can never be committed if they linger locally.
+/playwright_validate.js
+/playwright_validate.ps1
+/temp_venv.txt
 
 # TLS material. The local development certificate is generated on demand by
 # scripts/gen_tls_secret.sh and applied straight to the cluster; the private key

@@ -117,7 +117,9 @@ class AnswererAgent(BaseAgent):
         fence hanging open.
         """
         documents_block = fence_context(
-            context, max_chars=self.deps.settings.max_input_chars
+            context,
+            max_chars=self.deps.settings.max_input_chars,
+            max_total_chars=self.deps.settings.max_context_total_chars,
         )
         return (
             "Answer the question using only the documents below.\n\n"

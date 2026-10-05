@@ -13,9 +13,14 @@
 # which is enough to say something broke, and drops the paths.
 showErrorDetails = "type"
 
-# Hide developer controls (deploy, rerun, clear cache) from viewers. A reader
-# of the demo has no use for them and should not be able to click "Deploy".
-toolbarMode = "viewer"
+# Hide the toolbar's menu entirely. "viewer" already removed the developer
+# controls -- deploy, rerun, clear cache -- but left a menu of viewer options
+# (print, record screen, theme) in the header, which is Streamlit's UI showing
+# through a product that is not Streamlit. "minimal" shows only options set
+# externally or through `st.set_page_config`; this app sets no `menu_items`, so
+# there are none left and the menu is hidden. Strictly less exposed than
+# "viewer", so the hardening this section is for is unaffected.
+toolbarMode = "minimal"
 
 [browser]
 # A demonstration of controlled execution should not phone home.
@@ -34,8 +39,58 @@ maxUploadSize = 1
 # so a colour in this interface always says something.
 [theme]
 base = "dark"
+
+# --- ground and ink ------------------------------------------------------
 primaryColor = "#2F81F7"
-backgroundColor = "#0B0E14"
-secondaryBackgroundColor = "#141A23"
+backgroundColor = "#0A0D13"
+secondaryBackgroundColor = "#111721"
 textColor = "#E6EDF3"
-font = "sans serif"
+borderColor = "#1E2733"
+linkColor = "#5AA0FF"
+linkUnderline = false
+
+# --- type ----------------------------------------------------------------
+# System stack, deliberately. A web font is an external request, and this
+# project's whole argument is that it does not make requests it did not
+# declare. Hierarchy comes from weight, size and spacing instead.
+font = "sans-serif"
+headingFont = "sans-serif"
+codeFont = "monospace"
+# h1 carries the page; h2 is a section rule, not a second headline. The old
+# defaults made every h2 compete with the title.
+headingFontSizes = ["2.5rem", "1.28rem", "1.0rem", "0.92rem", "0.85rem", "0.8rem"]
+headingFontWeights = [650, 600, 600, 600, 600, 600]
+
+# --- geometry ------------------------------------------------------------
+# Small radii read as instrumentation; large ones read as a marketing page.
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# --- meaning -------------------------------------------------------------
+# These four are the only non-blue colours in the product, and each one is a
+# claim: green says it ran, amber says it stopped for a person, red says it
+# was refused, violet marks governance. Nothing decorative is ever coloured.
+greenColor = "#3FB950"
+redColor = "#F85149"
+yellowColor = "#D29922"
+violetColor = "#A371F7"
+grayColor = "#8B98A9"
+
+# --- data ----------------------------------------------------------------
+dataframeBorderColor = "#1E2733"
+dataframeHeaderBackgroundColor = "#0E141D"
+metricValueFontSize = "1.7rem"
+metricValueFontWeight = 600
+
+[theme.sidebar]
+# A shade below the content, so the page reads as the lit surface and the
+# navigation as the frame around it.
+backgroundColor = "#080B10"
+secondaryBackgroundColor = "#0E141D"
+borderColor = "#1A222D"
+textColor = "#C9D5E4"
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = false

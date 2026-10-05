@@ -74,9 +74,14 @@ RUN python -m pip install --no-cache-dir --no-compile --require-hashes -r /tmp/r
 # source of truth for what gets installed; letting pip resolve again here could
 # pull an unpinned version and quietly undo the lock.
 COPY --from=builder /build/dist/*.whl /tmp/
+# `pip uninstall` is not followed by `|| true`. It used to be, and in a chain of
+# `&&` that does not mean what it looks like: `a && b || true && c` runs `true`
+# when *anything* before it fails, so a failed install continued to the next
+# step and produced an image without its dependencies. Uninstalling a package
+# that is not there exits 0 with a warning, so nothing here needs excusing.
 RUN python -m pip install --no-cache-dir --no-compile --no-deps /tmp/*.whl \
  && rm -rf /tmp/*.whl \
- && python -m pip uninstall -y pip setuptools wheel 2>/dev/null || true \
+ && python -m pip uninstall -y pip setuptools wheel \
  && find /usr/local/lib/python3.12 -depth -name '__pycache__' -type d -exec rm -rf {} + \
  && find /usr/local/lib/python3.12 -name '*.pyc' -delete
 

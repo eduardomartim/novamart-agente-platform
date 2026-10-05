@@ -133,7 +133,12 @@ def _retrieved_documents(data: object) -> list[dict[str, Any]]:
     ]
 
 
-def fence_context(context: list[dict[str, Any]], *, max_chars: int | None = None) -> str:
+def fence_context(
+    context: list[dict[str, Any]],
+    *,
+    max_chars: int | None = None,
+    max_total_chars: int | None = None,
+) -> str:
     """Render gathered context with every untrusted field in its own fence.
 
     Fencing the whole block as one JSON blob puts the untrusted text inside a
@@ -156,13 +161,27 @@ def fence_context(context: list[dict[str, Any]], *, max_chars: int | None = None
     ``max_chars`` bounds each individual field *before* it is fenced. Trimming
     the assembled block instead would be a bug: the cut can land inside a
     closing marker and hand the model a fence that never closes.
+
+    ``max_total_chars`` bounds the assembled result. A per-field budget and an
+    item count cannot bound a total between them -- twenty items of five
+    documents of two fields at eight thousand characters is 800k, and only the
+    shape of the graph kept it far from that. Whole blocks are dropped rather
+    than cut, for the reason above, and what was dropped is stated in the
+    prompt: the same choice the gateway makes when a tool result is oversized,
+    where a payload is replaced rather than truncated. A model told plainly
+    that context was withheld can say so; one handed a silent fragment cannot.
     """
     budget = max_chars if max_chars and max_chars > 0 else None
+    total_budget = (
+        max_total_chars if max_total_chars and max_total_chars > 0 else None
+    )
 
     def clip(text: str) -> str:
         return text[:budget] if budget else text
 
     blocks: list[str] = []
+    used = 0
+    omitted = 0
 
     for item in context:
         source = _safe_label(item.get("source") or item.get("tool") or "unknown")
@@ -171,16 +190,35 @@ def fence_context(context: list[dict[str, Any]], *, max_chars: int | None = None
 
         if not documents:
             serialised = clip(json.dumps(data, default=str))
-            blocks.append(f"[source: {source}]\n{fence_tool_output(serialised)}")
-            continue
+            block = f"[source: {source}]\n{fence_tool_output(serialised)}"
+        else:
+            lines = [f"[source: {source}]"]
+            for document in documents:
+                identifier = _safe_label(document.get("doc_id", "")) or "unidentified"
+                lines.append(f"DOCUMENT {identifier}")
+                lines.append(
+                    f"title: {fence_tool_output(clip(str(document.get('title', ''))))}"
+                )
+                lines.append(
+                    f"body: {fence_tool_output(clip(str(document.get('body', ''))))}"
+                )
+            block = "\n".join(lines)
 
-        lines = [f"[source: {source}]"]
-        for document in documents:
-            identifier = _safe_label(document.get("doc_id", "")) or "unidentified"
-            lines.append(f"DOCUMENT {identifier}")
-            lines.append(f"title: {fence_tool_output(clip(str(document.get('title', ''))))}")
-            lines.append(f"body: {fence_tool_output(clip(str(document.get('body', ''))))}")
-        blocks.append("\n".join(lines))
+        # Measured after fencing, because fencing is what the model receives.
+        if total_budget is not None and used + len(block) > total_budget:
+            omitted += 1
+            continue
+        used += len(block)
+        blocks.append(block)
+
+    if omitted:
+        # Structure this code produced, outside every fence, and deliberately a
+        # count rather than a summary: describing what was dropped would put
+        # untrusted text back into the prompt it was dropped from.
+        blocks.append(
+            f"[{omitted} further context item(s) withheld: the assembled context "
+            f"reached its {total_budget}-character ceiling]"
+        )
 
     return "\n\n".join(blocks)
 

@@ -1,0 +1,21 @@
+# Inputs for the dashboard lock, `requirements-dashboard.txt`. Edit this file,
+# never the lock; regenerate the lock with the command in its header.
+#
+# The dashboard runs `AgentPlatform` in-process (see `dashboard/app.py:
+# get_platform()`), so it needs the whole platform plus Streamlit. The package
+# set itself comes from pyproject extras; this file only adds two things:
+#
+# 1. The API lock as a constraint, so every package both runtimes share
+#    resolves to the *same* version. Two deployments of one platform must not
+#    skew.
+# 2. The dashboard versions the pages were actually tested against. A resolve
+#    left to itself picks the newest Streamlit, and an untested Streamlit is a
+#    different product (`components.v1.html` is deprecated upstream).
+#    pandas is not imported by the dashboard; it is pinned only because
+#    Streamlit pulls it in and a lock must pin everything.
+
+-c requirements-api.txt
+
+streamlit==1.62.0
+altair==6.2.2
+pandas==3.0.5

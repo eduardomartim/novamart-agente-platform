@@ -127,5 +127,3 @@ def redact_pii(text: str, *, only: frozenset[str] | None = None) -> tuple[str, l
     return result, kinds
 
 
-def contains_pii(text: str) -> bool:
-    return bool(detect_pii(text))

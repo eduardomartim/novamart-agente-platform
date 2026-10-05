@@ -87,7 +87,7 @@ in its own events; the caller is told "execution refused".
 | Cross-process | signed `ExecutionGrant` | between processes |
 | In-process | `gateway_execution()` / `require_gateway()` | inside the executing process |
 
-The ContextVar is unchanged and still required — all nine tools still open with
+The ContextVar is unchanged and still required — all nineteen tools still open with
 `require_gateway()`. The grant proves authorisation crossed the boundary; the
 ContextVar proves nothing inside the tool server called a handler around the
 side. Removing either would leave a real gap.

@@ -310,14 +310,19 @@ def _steps(events: list[dict[str, Any]]) -> tuple[Step, ...]:
 
         bits = []
         if tool:
-            bits.append(f"tool {tool}")
+            bits.append(t("step.detail_tool", tool=tool))
         if event.get("policy_decision"):
+            # ALLOW / DENY / REQUIRE CONFIRMATION are the engine's own verdicts,
+            # shown as the same words on every page and in both languages.
             bits.append(str(event["policy_decision"]).replace("_", " "))
         if event.get("risk_level"):
-            bits.append(f"{event['risk_level']} risk")
+            level = str(event["risk_level"])
+            bits.append(t("step.detail_risk", risk=t(f"risk.{level}")
+                          if t(f"risk.{level}") != f"risk.{level}" else level))
         if event.get("rule_ids"):
             rules = event["rule_ids"]
-            bits.append(f"rule {rules if isinstance(rules, str) else ', '.join(rules)}")
+            bits.append(t("step.detail_rule",
+                          rules=rules if isinstance(rules, str) else ", ".join(rules)))
 
         steps.append(
             Step(

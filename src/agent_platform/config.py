@@ -83,8 +83,62 @@ DEFAULT_MAX_TOOL_OUTPUT_BYTES: Final[int] = 32_768
 result could still inflate every subsequent prompt.
 """
 
+DEFAULT_MAX_QUESTION_CHARS: Final[int] = 100
+"""How long one question from a person may be, in characters.
+
+Deliberately its own number rather than a smaller ``max_input_chars``. That one
+is the *context* budget: it is what ``fence_context`` clips each retrieved field
+to, so lowering it to bound a question would truncate knowledge-base documents
+to the length of a question and leave the answerer citing fragments. Two limits
+because there are two things being limited.
+
+Characters, not bytes and not UTF-16 units: ``len()`` in Python counts code
+points, so an accented letter costs one and so does an emoji. The browser's
+``maxlength`` counts UTF-16 units and is therefore *stricter* for anything
+outside the BMP -- it can refuse early, never late -- which is why this side
+stays the authority.
+"""
+
+DEFAULT_MAX_CONTEXT_TOTAL_CHARS: Final[int] = DEFAULT_MAX_TOOL_OUTPUT_BYTES * 2
+"""Ceiling on the whole assembled context, after fencing.
+
+The existing limits bound the wrong things to bound a total. ``max_context_items``
+counts items, ``fence_context``'s budget clips each field, and the gateway caps
+each tool result -- so the formal worst case multiplied out to twenty items of
+five documents of two fields of eight thousand characters, around 800k. Only the
+shape of the graph kept it far from that, and shape is not a limit.
+
+Two full-size tool results' worth. Today's graph gathers one, so this is
+headroom rather than a reduction, and it is expressed in terms of
+``max_tool_output_bytes`` because that is what actually fills a context.
+"""
+
 DEFAULT_MAX_PENDING_CONFIRMATIONS: Final[int] = 50
 """Ceiling on suspended requests held in memory awaiting a human decision."""
+
+DEFAULT_PENDING_SHARE_DIVISOR: Final[int] = 8
+"""How the per-caller share of the pending store is derived from the whole.
+
+The ceiling above bounds the store; it does not say who may fill it. A red-team
+pass showed what that omission is worth: one visitor, inside its own rate limit,
+took all fifty slots in six minutes, and every other visitor's high-risk action
+was then refused before a human ever saw it. Refusing rather than evicting is
+the right call and is why nothing was *lost* -- but availability of the approval
+mechanism is exactly what an attacker was able to remove.
+
+So capacity is shared as well as bounded. An eighth leaves room for eight
+concurrent callers at the derived value and is deliberately not generous: a
+single request suspends once, so needing more than a handful at a time is
+already unusual for one caller.
+"""
+
+DEFAULT_MIN_PENDING_PER_QUOTA_KEY: Final[int] = 2
+"""Floor on a derived share, so a small deployment stays usable.
+
+With a global cap of 8 the divisor alone would give 1, and a caller who
+suspended one action could not raise a second while the first was being read.
+Two is the smallest number that keeps the feature usable at any cap.
+"""
 
 DEFAULT_CONFIRMATION_TTL_SECONDS: Final[float] = 900.0
 """How long a suspended action stays resumable.
@@ -271,6 +325,22 @@ class Settings:
     global_requests_per_minute: int = 0
     global_requests_per_hour: int = 0
 
+    #: How many suspended actions **one caller** may hold at once.
+    #:
+    #: The same shape as the pair above, and for the same reason: the store's
+    #: global ceiling is a capacity control, and this is a fairness control. A
+    #: capacity control on its own says how much there is, never who gets it,
+    #: which is how one visitor came to hold all fifty slots while everyone
+    #: else was refused.
+    #:
+    #: ``0`` means "not configured" and derives a share from
+    #: :attr:`max_pending_confirmations`. Read it through
+    #: :attr:`effective_max_pending_per_quota_key`, which also clamps an
+    #: explicit value to the global cap -- a share larger than the whole store
+    #: is not a share, and configuring one would silently restore the old
+    #: behaviour under a name that suggests otherwise.
+    max_pending_per_quota_key: int = 0
+
     #: ``enforced`` (the default) or ``disabled``.
     #:
     #: There is no third state and no implicit one. With no credentials
@@ -293,6 +363,17 @@ class Settings:
     #: child processes** -- and this platform spawns one when
     #: ``TOOL_TRANSPORT=mcp``.
     api_auth_keys_file: Path | None = None
+
+    #: Ceiling on one question from a person, in characters. Separate from
+    #: ``max_input_chars``, which is the context budget -- see
+    #: :data:`DEFAULT_MAX_QUESTION_CHARS`.
+    max_question_chars: int = DEFAULT_MAX_QUESTION_CHARS
+
+    #: Ceiling on the assembled context handed to a model, in characters and
+    #: after fencing. Complements the per-field and per-item limits above,
+    #: which between them cannot bound a total. See
+    #: :data:`DEFAULT_MAX_CONTEXT_TOTAL_CHARS`.
+    max_context_total_chars: int = DEFAULT_MAX_CONTEXT_TOTAL_CHARS
 
     def __repr__(self) -> str:
         """Render without the credential, in any context that reprs Settings."""
@@ -318,6 +399,21 @@ class Settings:
         return self.global_requests_per_hour or (
             self.requests_per_hour * DEFAULT_GLOBAL_LIMIT_MULTIPLIER
         )
+
+    @property
+    def effective_max_pending_per_quota_key(self) -> int:
+        """How many suspended actions one caller may hold, as enforced.
+
+        Clamped to the global cap in both directions. Deriving can only ever
+        produce a value at or below it, but an operator setting the variable
+        directly can overshoot, and a per-caller share above the whole store
+        is the global cap wearing a different name.
+        """
+        configured = self.max_pending_per_quota_key or max(
+            DEFAULT_MIN_PENDING_PER_QUOTA_KEY,
+            self.max_pending_confirmations // DEFAULT_PENDING_SHARE_DIVISOR,
+        )
+        return max(1, min(configured, self.max_pending_confirmations))
 
     @property
     def demo_mode(self) -> bool:
@@ -359,6 +455,14 @@ class Settings:
             max_request_cost_usd=_get_decimal("MAX_REQUEST_COST", "0.05"),
             max_input_chars=_get_int("MAX_INPUT_CHARS", 8000, minimum=1),
             max_context_items=_get_int("MAX_CONTEXT_ITEMS", 20, minimum=1),
+            max_question_chars=_get_int(
+                "MAX_QUESTION_CHARS", DEFAULT_MAX_QUESTION_CHARS, minimum=1
+            ),
+            max_context_total_chars=_get_int(
+                "MAX_CONTEXT_TOTAL_CHARS",
+                DEFAULT_MAX_CONTEXT_TOTAL_CHARS,
+                minimum=256,
+            ),
             max_trace_payload_chars=_get_int("MAX_TRACE_PAYLOAD_CHARS", 500, minimum=0),
             # Hard resource limits. Minimums are all >= 1 so a misconfigured
             # value cannot silently disable a limit entirely.
@@ -377,6 +481,9 @@ class Settings:
             max_pending_confirmations=_get_int(
                 "MAX_PENDING_CONFIRMATIONS", DEFAULT_MAX_PENDING_CONFIRMATIONS, minimum=1
             ),
+            # ``minimum=0`` because 0 is the "derive it" value, exactly as it is
+            # for the global rate ceilings above.
+            max_pending_per_quota_key=_get_int("MAX_PENDING_CONFIRMATIONS_PER_KEY", 0),
             confirmation_ttl_seconds=_get_float(
                 "CONFIRMATION_TTL_SECONDS", DEFAULT_CONFIRMATION_TTL_SECONDS, minimum=1.0
             ),
@@ -434,6 +541,7 @@ class Settings:
             "request_deadline_seconds": str(self.request_deadline_seconds),
             "max_tool_output_bytes": str(self.max_tool_output_bytes),
             "max_pending_confirmations": str(self.max_pending_confirmations),
+            "max_pending_per_quota_key": str(self.effective_max_pending_per_quota_key),
             "confirmation_ttl_seconds": str(self.confirmation_ttl_seconds),
             "circuit_failure_threshold": str(self.circuit_failure_threshold),
             "circuit_cooldown_seconds": str(self.circuit_cooldown_seconds),

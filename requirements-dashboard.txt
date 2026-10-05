@@ -1,0 +1,50 @@
+# What the Streamlit dashboard needs to run. Railway installs from this.
+#
+# The dashboard is not a client of the API. It imports `AgentPlatform` and runs
+# it in the same process -- see `dashboard/app.py:get_platform()` -- so it needs
+# everything the platform needs, not just Streamlit. That includes `redis` and
+# `psycopg`, because a deployed dashboard is configured with `REDIS_URL` and
+# `DATABASE_URL` like any other replica.
+#
+# Which is why this includes the API lock rather than restating it. Two
+# independent lists of seventy pins would drift the first time one was
+# regenerated and not the other, and the failure would show up as a version skew
+# between the two deployments of the same platform.
+#
+# Every package below is pinned, transitive ones included, so a build resolves
+# nothing on its own. They are the packages a resolve of
+# `requirements-dashboard.in` adds on top of the API lock:
+#
+#     uv pip compile pyproject.toml requirements-dashboard.in \
+#       --extra dashboard --extra api --extra redis --extra mcp --extra postgres \
+#       --python-version 3.12 --python-platform x86_64-unknown-linux-gnu
+#
+# On hashes, plainly: `requirements-api.txt` carries them and they are still
+# checked. The pins below are by version only, so pip's all-or-nothing hash mode
+# needs `--no-require-hashes` to install this file, which verifies hashes where
+# present and permits the rest. Adding `--generate-hashes` to the command above
+# would close that gap; it is not done yet.
+
+-r requirements-api.txt
+
+# Imported by `dashboard/app.py`.
+streamlit==1.62.0
+altair==6.2.2
+
+# Pulled in by the two above. Not imported by the dashboard (pandas included --
+# Streamlit depends on it), pinned so the image is the one that was tested.
+blinker==1.9.0
+httptools==0.8.0
+itsdangerous==2.2.0
+jinja2==3.1.6
+markupsafe==3.0.4
+narwhals==2.26.0
+pandas==3.0.5
+pillow==12.3.0
+protobuf==7.36.2
+pyarrow==25.0.1
+pydeck==0.9.3
+python-dateutil==2.9.0.post0
+six==1.17.0
+toml==0.10.2
+watchdog==6.0.0

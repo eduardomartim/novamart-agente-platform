@@ -1,7 +1,7 @@
 # Threat model
 
 Scope: the demo platform as it runs in this repository — a single process, a
-local SQLite database, eight simulated tools, one optional external LLM provider,
+local SQLite database, nineteen simulated tools, one optional external LLM provider,
 and a single trusted local operator.
 
 Explicitly **out of scope**: multi-tenancy, end-user identity (the platform
@@ -119,8 +119,16 @@ benign action is reused for a dangerous one.*
   - Two independent sanitisation gates before persistence.
   - `Settings.describe()` reduces the key to a presence flag.
   - The key is never placed in a prompt or in `AgentState`.
+  - Credentials embedded in a connection string (`scheme://user:pass@host`,
+    including `redis://:pass@host`) are redacted by pattern, keeping the host
+    readable; and **every** credential the process holds -- provider key, grant
+    secret, `DATABASE_URL`, `REDIS_URL` and the passwords inside those URLs -- is
+    redacted by value (F-03, closed).
+  - The events a request writes *after* a human confirmation are redacted with
+    the same secret list as the events before it. The resumed half used to get
+    a tracer with no known secrets at all.
 - **Residual risk** Novel credential formats will not match a pattern. The
-  known-value redaction covers the platform's own secret regardless of shape.
+  known-value redaction covers the platform's own secrets regardless of shape.
 - **Found in Phase 3 (F6, critical):** every *deliberate* egress path was
   defended and the key still leaked -- through `repr(Settings)`. A dataclass
   repr includes every field, so any traceback, log line, debugger frame or test
@@ -159,8 +167,10 @@ benign action is reused for a dangerous one.*
 - **Impact** Medium · **Likelihood** Medium
 - **Mitigations** Sliding-window per-minute and per-hour quotas, enforced before
   the graph is entered. The limiter fails **closed**.
-- **Residual risk** In-process only. A multi-process deployment shares no state
-  and would need Redis.
+- **Residual risk** Shared across replicas only when `REDIS_URL` is set
+  (`SharedRateLimiter`); without it each process counts on its own. The public
+  dashboard charges each visitor their own bucket, keyed on a salted digest of
+  `X-Real-IP` -- see T16.
 
 ### T10 — Infinite loops
 
@@ -253,8 +263,32 @@ accumulated suspended requests.*
 - **Critically, none of these can authorise anything.** `ResourceGuard` has one
   verb -- *stop*. Its public surface is asserted to contain no `evaluate`,
   `authorize` or `allow`, and the policy engine never consults it.
-- **Residual risk** All state is in-process; counters, circuit and pending
-  confirmations do not survive a restart or span processes.
+  - one caller may hold at most a share of the pending store
+    (`MAX_PENDING_CONFIRMATIONS_PER_KEY`, derived 6 of 50), so one visitor
+    cannot fill it and lock everyone else out of the approval step (F-02)
+  - the HTTP API reads a request body with a byte ceiling while streaming it and
+    answers `413` before buffering more (F-04, closed)
+- **Residual risk** Without `REDIS_URL` the counters, circuit and pending
+  confirmations are process-local and do not survive a restart.
+
+### T16 — The public dashboard
+
+*Anyone on the internet can open the dashboard, ask questions, and approve the
+simulated actions it proposes.*
+
+- **Impact** Low (nothing real can be changed) · **Likelihood** High
+- **Mitigations**
+  - Per-visitor quota: a salted digest of `X-Real-IP` (the one header Railway's
+    edge writes) names each visitor's rate-limit and pending-confirmation
+    bucket. The raw address is never stored, logged or rendered;
+    `X-Forwarded-For` is ignored.
+  - Per-visitor data: each browser session gets its own copy of the simulated
+    HDstore records, so an update one visitor approves changes what *they* read
+    next and nothing anyone else sees. It used to be one copy per process.
+  - Every question is capped at 100 characters on every entry point.
+- **Residual risk** `X-Real-IP` is only trustworthy behind Railway's edge; behind
+  another proxy the trust boundary in `dashboard/app.py` must be revisited. A
+  visitor with many addresses gets many buckets.
 
 ## Phase 4 findings
 
@@ -308,13 +342,16 @@ These are real and deliberately not addressed, because the project is a demo:
    rather than from the request body. What remains accepted is that there is no
    TLS, so the token relies on the network being trusted, which is why the
    Kubernetes Service is not published.
-2. **Single-process state.** Rate limits and pending confirmations do not survive
-   a restart or scale across processes.
+2. **Process-local state by default.** Rate limits and pending confirmations are
+   shared across replicas only when `REDIS_URL` is configured; the default
+   deployment keeps them in one process, and they do not survive a restart.
 3. **`.env` secrets.** Adequate locally; production needs a managed store.
    Note that as of V2.7 a key found in `.env` no longer authorises anything on
    its own: real provider calls require `AGENT_PLATFORM_LIVE`, which is
    deliberately not read from `.env` at all.
-4. **No transport security.** The dashboard binds to localhost with no TLS.
+4. **Transport security is the platform's.** The dashboard image binds
+   `0.0.0.0` inside its container and relies on Railway's edge for TLS; run
+   anywhere else, it is plain HTTP.
 5. **Third-party trust.** The Gemini API and the dependency tree are trusted;
    `pip-audit` runs clean but is a point-in-time check.
 6. **Accidental spend, addressed in V2.7.** Previously the only thing standing
@@ -326,7 +363,7 @@ These are real and deliberately not addressed, because the project is a demo:
    rather than a permission check. Real calls now require `AGENT_PLATFORM_LIVE`,
    enforced in `build_provider()` below pytest and shared by the CLI, the
    dashboard and the index builder. Possessing a key is not authorisation.
-6. **Vendor data handling.** Prompt content that survives egress redaction is
+7. **Vendor data handling.** Prompt content that survives egress redaction is
    subject to the provider's retention and training policy, which this project
    does not control and does not attempt to characterise.
 
@@ -348,7 +385,9 @@ The mandatory checks map to tests as follows:
 | T10 | `test_validate_stops_at_the_retry_ceiling`, `test_refusals_are_never_retried` |
 | T13 | `tests/security/test_prompt_egress.py` (18 tests), plus `test_credentials_never_reach_the_provider` on the live path |
 | T14 | `tests/security/test_provider_failure.py` (24 tests) |
-| T15 | `tests/security/test_abuse_limits.py` (32 tests) |
+| T15 | `tests/security/test_abuse_limits.py`, `test_pending_per_key_cap.py`, `tests/integration/test_api_body_limit.py` |
+| T16 | `tests/integration/test_visitor_quota.py`, `tests/security/test_visitor_dataset_isolation.py` |
+| T6 (resumed trace, URIs) | `tests/security/test_resumed_audit_trail.py`, `tests/security/test_credential_redaction.py` |
 | F6 | `test_settings_repr_never_contains_the_key`, `test_no_credential_bearing_object_leaks_through_repr` |
 | F7 | `tests/security/test_error_leakage.py` — home-path redaction and gateway exception sanitisation |
 | F8 | `test_combining_marks_do_not_evade_injection_detection`, `test_normalised_input_preserves_legitimate_accents` |

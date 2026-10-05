@@ -1,0 +1,38 @@
+# Railway service configuration for the Streamlit dashboard.
+#
+# Why this file exists at all: Railway prioritises a Dockerfile it detects over
+# its own builder, and the Dockerfile at the repository root is the **API**
+# image -- it ends in `python -m agent_platform.api`. Left to detection, a
+# Railway deployment of this repository would build and start the API and the
+# dashboard would never run. Naming the builder and the Dockerfile here removes
+# the guess.
+#
+# `dockerfilePath` is a config-as-code field (Railway's reference: "Specifies
+# the location of a non-standard Dockerfile"), so the repository alone decides
+# which image is built. An earlier version of this file said the opposite and
+# relied on a `RAILWAY_DOCKERFILE_PATH` service variable; that variable still
+# works, but it lives outside the repository, and a service created without it
+# would have built the API.
+#
+# Nothing about Vercel belongs in this file. The API is a separate deployment
+# with its own entrypoint and its own manifest; the two share a platform, not a
+# configuration.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.dashboard"
+
+[deploy]
+# No `startCommand`. The image's CMD already runs Streamlit against `$PORT` in
+# shell form, and repeating it here would be a second place for the port
+# handling to be wrong -- overriding a Dockerfile's command from Railway uses
+# exec form, which does not expand variables at all.
+
+# Streamlit's own readiness endpoint. It answers as soon as the server is
+# accepting connections, which is what a health check should ask, and it runs no
+# script and touches no provider.
+healthcheckPath = "/_stcore/health"
+healthcheckTimeout = 120
+
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

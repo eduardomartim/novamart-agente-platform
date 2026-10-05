@@ -18,18 +18,12 @@ returns one, which is what makes it testable without a network or an index.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
 #: Equal weighting is the honest default to *start* an evaluation from: it
 #: asserts nothing about which signal matters more on this corpus. It is not a
 #: tuned value and must not be described as one.
 DEFAULT_LEXICAL_WEIGHT = 0.5
 DEFAULT_VECTOR_WEIGHT = 0.5
-
-
-class Scored(Protocol):
-    doc_id: str
-    score: float
 
 
 @dataclass(frozen=True, slots=True)

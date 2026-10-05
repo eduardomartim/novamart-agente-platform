@@ -555,6 +555,11 @@ def test_resource_guard_grants_nothing():
         "account_tool_output",
         "active_requests",
         "begin",
+        # Added with the physical-attempt and embedding ceilings. Both raise or
+        # return a counter, and both only ever subtract from what a request has
+        # left, so the property this test defends is unchanged.
+        "charge_embedding_call",
+        "charge_llm_attempt",
         "charge_llm_call",
         "charge_tool_call",
         "check_deadline",

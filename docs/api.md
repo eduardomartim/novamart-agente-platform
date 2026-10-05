@@ -7,18 +7,29 @@ gateway.
 
 ## Running it
 
+Every way of starting the API needs a credential first: with none configured it
+**refuses to start** rather than serve unauthenticated (see *Authentication*).
+Mint one -- the token is printed once and not stored -- and export the
+configuration line it prints:
+
+```bash
+agent-platform auth new-key --principal local-dev --scope runs:write --scope confirm:write
+export API_AUTH_KEYS="<the line it printed>"
+```
+
 ### In a container
 
 ```bash
 docker compose up --build
 ```
 
-Serves on `http://localhost:8000`, offline, against the deterministic stub. Or
-without compose:
+Serves on `http://localhost:8000`, offline, against the deterministic stub;
+`compose.yaml` passes `API_AUTH_KEYS` through and refuses to start without it.
+Or without compose:
 
 ```bash
-docker build -t agent-platform:v2.1 .
-docker run --rm -p 8000:8000 agent-platform:v2.1
+docker build -t agent-platform:v2.6 .
+docker run --rm -p 8000:8000 -e API_AUTH_KEYS agent-platform:v2.6
 ```
 
 ### From a checkout
@@ -27,6 +38,9 @@ docker run --rm -p 8000:8000 agent-platform:v2.1
 pip install -e ".[api]"
 python -m agent_platform.api
 ```
+
+Running without authentication is possible and has to be typed out:
+`API_AUTH_MODE=disabled`.
 
 Listens on `127.0.0.1:8000`. `API_HOST` and `API_PORT` override that; everything
 else is read by `Settings.from_env()` exactly as the CLI reads it. With no
@@ -201,10 +215,11 @@ there will not be one: URLs reach access logs and proxies.
 
 ### What this does not fix
 
-**There is no TLS.** A bearer token over plain HTTP is a token in the clear.
-Terminating TLS is an ingress concern and is not addressed here, which is why
-the Kubernetes Service remains `ClusterIP` with no Ingress -- authentication
-alone does not make the port safe to publish. The platform also remains
+**The API itself does not terminate TLS.** A bearer token over plain HTTP is a
+token in the clear, so TLS belongs at the edge: the local Kubernetes setup
+terminates it at an Ingress (see [kubernetes.md](kubernetes.md#tls-locally)),
+and Vercel terminates it for the serverless deployment
+([deploy.md](deploy.md)). Run bare, on a published port, it is plain HTTP. The platform also remains
 single-tenant: scopes are not tenants, and budget and data stay global.
 
 Credentials are read at start-up, so rotation is add-then-remove followed by a
@@ -336,3 +351,13 @@ scaling is possible, not proven.
 There is no message queue, no external database, no service mesh and no
 orchestrator in this document's scope. Both arrived later: MCP in V2.3, and
 Kubernetes with an HPA in V2.4.
+
+## Request size
+
+Bodies are read with a byte ceiling, `MAX_BODY_BYTES` (397,312 bytes), enforced
+while the body streams in: a declared `Content-Length` over it is refused
+without reading, and a chunked body is refused at the first chunk that crosses
+it. Either way the answer is `413 payload_too_large`, and at most the ceiling
+plus one chunk is ever held. The number is derived from the schema's own input
+limit with every character JSON-escaped, so it can never refuse a body the
+schema would accept.

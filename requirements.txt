@@ -1,0 +1,18 @@
+# The API's dependencies, for any tool that looks for a root `requirements.txt`.
+#
+# Neither deployment reads this file. Vercel installs from `api/requirements.txt`
+# (beside the entrypoint, found before the root `pyproject.toml`); the Docker
+# images install from `requirements-api.txt` and `requirements-dashboard.txt`.
+# It exists so a generic tool pointed at the repository root gets the API set
+# rather than nothing -- and, like the others, it includes the hashed lock
+# instead of restating it, so it cannot drift.
+#
+# Restating it was the first attempt and it was wrong. A second list of
+# unpinned ranges would drift from the lock silently, and it would drop the
+# hashes -- which is the whole point of the lock, since `--require-hashes` is
+# what stops a compromised index from substituting a package.
+#
+# The dashboard's packages are absent, so Streamlit, pandas, altair and pyarrow
+# (~170MB) are not shipped to anything that only runs the API.
+
+-r requirements-api.txt

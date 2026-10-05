@@ -52,6 +52,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from ..security.resources import charge_current_embedding_call
 from .embedding_cache import QueryEmbeddingCache
 from .hybrid import fuse
 from .index import IndexIntegrityError, VectorIndex
@@ -219,6 +220,13 @@ def _query_vector(provider: LLMProvider, query: str) -> tuple[float, ...]:
     cached = _cache.get(normalised, DEFAULT_EMBEDDING_MODEL)
     if cached is not None:
         return cached
+
+    # One logical embedding, charged where the cache decided there would be
+    # one. A hit returns above and costs nothing, which is the same rule the
+    # budget already follows; a miss is charged before the call, so a request
+    # that has run out of embedding allowance -- or out of deadline to spend on
+    # one -- never reaches the provider.
+    charge_current_embedding_call()
 
     embedding = provider.embed(query, task=EmbedTask.QUERY)
     _cache.put(normalised, DEFAULT_EMBEDDING_MODEL, embedding.vector)

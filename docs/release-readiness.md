@@ -47,8 +47,8 @@ successful run rather than a fresh one.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Offline suite | **PASS** | 1495 passed / 23 skipped / 3 environment failures on this Windows host |
-| Security suite | **PASS** | 727 passed |
+| Offline suite | **PASS** | 2218 selected; 2166 passed / 51 skipped (Docker, Redis, PostgreSQL absent; 1 intentional) on Windows, Python 3.12 -- the one remaining check compares the protected-file manifest with the last commit and passes once the change is committed |
+| Security suite | **PASS** | 844 collected; part of the run above |
 | Shuffled order, two seeds | **PASS** | 1493 × 2 on Linux |
 | Container suite | **PASS** | 26 passed (last run before the daemon stopped) |
 | Scale, ten replicas | **PASS** | `tests/integration/test_scale.py`, 9 tests |

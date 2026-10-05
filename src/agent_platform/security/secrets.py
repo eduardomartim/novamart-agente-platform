@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Final
+from urllib.parse import unquote, urlsplit
 
 REDACTED: Final[str] = "[REDACTED:{kind}]"
 
@@ -40,6 +41,18 @@ SECRET_PATTERNS: Final[tuple[SecretPattern, ...]] = (
     SecretPattern("aws_access_key_id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     SecretPattern("github_token", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{36,}\b")),
     SecretPattern("slack_token", re.compile(r"\bxox[abprs]-[0-9A-Za-z\-]{10,}\b")),
+    # Credentials embedded in a connection string: the userinfo of
+    # `scheme://user:password@host`, with the user part allowed to be empty as
+    # in `redis://:password@cache:6379/0`. Only the userinfo is replaced, so the
+    # scheme and host -- which is what a person debugging needs -- stay
+    # readable. Before this, a DSN was redacted only by accident, when
+    # `user:pass@host.tld` happened to look like an email address, and a
+    # password in `redis://:pw@cache` or `postgres://u:pw@10.0.0.5` went
+    # through untouched.
+    SecretPattern(
+        "uri_credentials",
+        re.compile(r"(?i)(?<=://)[^\s:/@'\"<>]*:[^\s/@'\"<>]+(?=@)"),
+    ),
     SecretPattern(
         "private_key",
         re.compile(r"-----BEGIN[ A-Z]*PRIVATE KEY-----.*?-----END[ A-Z]*PRIVATE KEY-----", re.S),
@@ -116,6 +129,30 @@ def redact_known_values(text: str, values: object) -> str:
         if value and len(value) >= 8:
             result = result.replace(value, REDACTED.format(kind="known_secret"))
     return result
+
+
+def known_secret_values(*values: str | None) -> tuple[str, ...]:
+    """The literal values to redact by identity, from configured credentials.
+
+    Each configured value is included as-is, and a connection string also
+    contributes the password inside it -- the password is what leaks when an
+    error message quotes a driver's parsed settings rather than the URL. Empty
+    values are dropped; nothing here is ever logged or returned to a caller.
+    """
+    found: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        found.append(value)
+        if "://" in value:
+            try:
+                password = urlsplit(value).password
+            except ValueError:
+                password = None
+            if password:
+                found.append(unquote(password))
+                found.append(password)
+    return tuple(dict.fromkeys(found))
 
 
 def contains_secret(text: str) -> bool:
