@@ -13,7 +13,7 @@ real customer;* all of its customers, orders and tickets are synthetic.
 Python 3.12 · LangGraph · Google Gemini · Streamlit · Starlette · PostgreSQL ·
 Redis · MCP · Docker · MIT licence
 
----<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b064f245-1827-443c-b4b0-e44be64551b3" />
+---
 
 
 ## Overview
