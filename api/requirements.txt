@@ -1,23 +1,87 @@
-# The API's dependency manifest, placed beside the entrypoint on purpose.
+# The API's dependency manifest for Vercel, beside the entrypoint.
 #
-# Vercel's Python builder walks up from the entrypoint's directory to the
-# repository root and, at each level, looks for `pyproject.toml`, `Pipfile.lock`
-# and `Pipfile` *before* it looks for `requirements*.txt`. This repository has a
-# `pyproject.toml` at the root, so without this file the walk would reach the
-# root, find that, and install `[project.dependencies]` -- which is the library
-# core and deliberately excludes `starlette`, `uvicorn`, `redis` and `psycopg`.
-# The function would then fail to import at cold start with a missing Starlette,
-# and the hashed lock the rest of this project maintains would never be read.
+# Self-contained on purpose. It used to be `-r ../requirements-api.txt`, and
+# Vercel's requirements parser refuses an include that leaves this directory
+# ("Failed to parse ... Error parsing included file"), so the build failed.
 #
-# `api/` has no `pyproject.toml`, so this file is found one level earlier and
-# settles it. It is a pointer, not a second list: the lock stays the single
-# source of truth for what the API installs, exactly as it is for the Docker
-# image, so the two deployments cannot drift apart.
+# The pins are exactly those of the repository's `requirements-api.txt` -- the
+# same seventy packages at the same versions, nothing from the dashboard. The
+# `--hash` lines are not repeated: Vercel converts this file with uv's parser and
+# keeps only the `==` pins anyway. Artefact verification by hash is the Docker
+# image's `--require-hashes` install of `requirements-api.txt`.
 #
-# One consequence worth knowing rather than discovering: Vercel parses this with
-# uv's requirements parser and converts it into a generated `pyproject.toml`,
-# keeping the `==` pins but dropping the `--hash` lines. Versions are therefore
-# identical to the image; artefact verification is pip's `--require-hashes` in
-# the Dockerfile and is not available on that path.
+# Two lists of one lock could drift, so they may not:
+# `tests/integration/test_deployment_manifests.py` fails if any package or
+# version here differs from `requirements-api.txt`. After regenerating the lock,
+# regenerate this list from it.
 
--r ../requirements-api.txt
+annotated-types==0.8.0
+anyio==4.14.2
+attrs==26.1.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+cryptography==50.0.1
+distro==1.9.0
+google-auth==2.57.0
+google-genai==2.20.0
+h11==0.16.0
+httpcore==1.0.9
+httpcore2==2.12.0
+httpx==0.28.1
+httpx2==2.12.0
+idna==3.19
+jsonpatch==1.33
+jsonpath-ng==1.8.0
+jsonpointer==3.1.1
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+langchain-core==1.6.1
+langchain-protocol==0.0.19
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+langgraph-checkpoint-redis==0.5.2
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.4
+langsmith==0.11.2
+mcp==2.1.1
+mcp-types==2.1.1
+ml-dtypes==0.6.0
+numpy==2.5.2
+opentelemetry-api==1.44.0
+orjson==3.12.0
+ormsgpack==1.12.2
+packaging==26.3
+psycopg==3.3.4
+psycopg-binary==3.3.4
+psycopg-pool==3.3.1
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycparser==3.0
+pydantic==2.13.5
+pydantic-core==2.46.5
+pyjwt==2.13.0
+python-dotenv==1.2.3
+python-multipart==0.0.32
+python-ulid==4.0.1
+pyyaml==6.0.3
+redis==7.4.1
+redisvl==0.26.0
+referencing==0.37.0
+requests==2.34.2
+requests-toolbelt==1.0.0
+rpds-py==2026.6.3
+sniffio==1.3.1
+sse-starlette==3.4.8
+starlette==1.6.0
+tenacity==9.1.4
+truststore==0.10.4
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+urllib3==2.7.0
+uuid-utils==0.17.0
+uvicorn==0.52.4
+websockets==16.1.1
+xxhash==4.0.1
+zstandard==0.25.0

@@ -117,14 +117,38 @@ def test_the_api_is_not_shipped_the_dashboard(api_requirements):
         assert package not in api_requirements, f"{package} does not belong in the API"
 
 
-def test_the_api_manifest_points_at_the_lock_rather_than_restating_it():
-    """One source of truth, so the image and the function cannot drift apart."""
-    body = "\n".join(
-        line.split("#", 1)[0].strip()
-        for line in (API_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines()
+def _pinned(path: Path) -> list[str]:
+    """`name==version` tokens, sorted -- continuations and hashes ignored."""
+    return sorted(
+        line.split()[0]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if re.match(r"^[A-Za-z0-9._-]+==", line.strip())
     )
-    directives = [line for line in body.splitlines() if line]
-    assert directives == ["-r ../requirements-api.txt"], directives
+
+
+def test_the_api_manifest_is_self_contained():
+    """Vercel's requirements parser refuses an include that leaves `api/`.
+
+    `-r ../requirements-api.txt` failed the build with "Error parsing included
+    file", so the manifest lists its pins itself: no include, no constraint, no
+    editable install, no relative path.
+    """
+    for raw in (API_DIR / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        assert not line.startswith(("-r", "--requirement", "-c", "--constraint", "-e")), line
+        assert ".." not in line, line
+        assert re.fullmatch(r"[A-Za-z0-9._-]+==[A-Za-z0-9._+!-]+", line), (
+            f"not a bare pin: {line!r}"
+        )
+
+
+def test_the_api_manifest_pins_exactly_the_lock():
+    """Same packages, same versions as `requirements-api.txt`, so the function
+    and the Docker image cannot drift. Hashes stay in the lock, where the image
+    verifies them."""
+    assert _pinned(API_DIR / "requirements.txt") == _pinned(ROOT / "requirements-api.txt")
 
 
 def test_the_lock_the_api_resolves_to_is_still_hashed():
